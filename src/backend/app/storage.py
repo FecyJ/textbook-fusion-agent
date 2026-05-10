@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .schemas import AppState
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
-DATA_DIR = ROOT_DIR / "data"
+DATA_DIR = Path(os.getenv("TEXTBOOK_FUSION_DATA_DIR", str(ROOT_DIR / "data")))
 UPLOAD_DIR = DATA_DIR / "uploads"
 CACHE_DIR = DATA_DIR / "cache"
 INDEX_DIR = DATA_DIR / "indexes"
@@ -39,4 +40,3 @@ def save_state(state: AppState) -> None:
 def safe_filename(filename: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in "._-（）()[]【】 " else "_" for ch in filename)
     return safe.strip() or "upload"
-

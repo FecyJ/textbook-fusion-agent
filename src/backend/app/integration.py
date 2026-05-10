@@ -168,10 +168,10 @@ def trim_to_compression(nodes: list[KnowledgeNode], decisions: list[IntegrationD
         removed.append(node)
         current -= len(node.definition)
     if current > target_chars and nodes:
-        per_node = max(40, target_chars // len(nodes)) if target_chars else 40
+        per_node = max(1, target_chars // len(nodes)) if target_chars else 1
         for node in nodes:
             if len(node.definition) > per_node:
-                node.definition = node.definition[: per_node - 1] + "…"
+                node.definition = node.definition[:per_node]
     for node in removed:
         decisions.append(
             IntegrationDecision(
