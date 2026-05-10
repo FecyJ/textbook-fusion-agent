@@ -2,6 +2,16 @@
 
 AI 全栈黑客松项目：面向多本教材的知识整合、知识图谱、RAG 问答与整合报告生成。
 
+## 评审快速入口
+
+- F 创新点总览：`docs/创新点说明.md`
+- Agent 架构与取舍：`docs/Agent 架构说明.md`
+- RAG Benchmark 数据：`docs/RAG Benchmark.md`
+- 系统设计：`docs/系统设计.md`
+- 需求分析：`docs/需求分析.md`
+- 接口文档：`docs/接口文档.md`
+- 真实整合报告：`report/整合报告.md`
+
 ## 环境依赖
 
 - Python 3.10+
