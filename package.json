@@ -1,0 +1,15 @@
+{
+  "name": "textbook-fusion-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": ".venv/bin/uvicorn src.backend.app.main:app --reload --reload-dir src/backend --host 0.0.0.0 --port 8000",
+    "dev:frontend": "npm --prefix src/frontend run dev -- --host 0.0.0.0",
+    "install:all": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && npm install && npm --prefix src/frontend install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

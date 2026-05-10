@@ -1,0 +1,38 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+src/frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+src/frontend/dist/
+src/frontend/.vite/
+*.tsbuildinfo
+
+# Runtime data and generated artifacts
+data/uploads/
+data/indexes/
+data/cache/
+logs/
+
+# Textbook data must not be pushed to GitHub
+data/textbooks/*.pdf
+textbooks/*.pdf
+*.pdf
