@@ -46,10 +46,10 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "llm": {
-            "provider": "deepseek",
-            "model": settings.deepseek_model,
-            "base_url": settings.deepseek_api_base_url,
-            "api_key_configured": bool(settings.deepseek_api_key),
+            "provider": settings.llm_provider,
+            "model": settings.llm_model,
+            "base_url": settings.llm_api_base_url,
+            "api_key_configured": bool(settings.llm_api_key),
         },
     }
 

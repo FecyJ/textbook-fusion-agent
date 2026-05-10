@@ -11,13 +11,14 @@ from .core.config import settings
 
 class LlmClient:
     def __init__(self) -> None:
-        self.api_key = settings.deepseek_api_key
-        self.base_url = settings.deepseek_api_base_url.rstrip("/")
-        self.model = settings.deepseek_model
+        self.api_key = settings.llm_api_key
+        self.base_url = settings.llm_api_base_url.rstrip("/")
+        self.model = settings.llm_model
+        self.provider = settings.llm_provider
 
     @property
     def configured(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key and self.base_url and self.model)
 
     async def chat_json(self, system: str, user: str, temperature: float = 0.1, timeout: float = 20) -> dict[str, Any]:
         text = await self.chat(system, user, temperature=temperature, response_format={"type": "json_object"}, timeout=timeout)

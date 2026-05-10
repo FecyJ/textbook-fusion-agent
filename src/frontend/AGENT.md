@@ -15,8 +15,8 @@ Applies to `src/frontend/`.
 ## Mandatory Design Skill
 
 - Before designing or implementing any frontend UI, use the `frontend-design` skill.
-- Apply it as a product-quality interface constraint, not as decoration: this project should feel like a medical education knowledge-integration command center.
-- The visual direction is restrained, professional, data-dense, and teacher/reviewer oriented. Avoid landing-page composition, generic AI gradients, purple-blue hero styling, nested cards, and long in-app explanatory copy.
+- Apply it as a product-quality interface constraint, not as decoration: this project should feel like a textbook/course knowledge-integration command center.
+- The visual direction is restrained, professional, data-dense, and teacher/reviewer oriented across disciplines. Avoid landing-page composition, generic AI gradients, purple-blue hero styling, nested cards, and long in-app explanatory copy.
 
 ## Responsibilities
 

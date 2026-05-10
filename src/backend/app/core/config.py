@@ -1,16 +1,17 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    deepseek_api_key: str | None = Field(default=None, validation_alias="DEEPSEEK_API_KEY")
-    deepseek_api_base_url: str = Field(
-        default="https://api.deepseek.com",
-        validation_alias="DEEPSEEK_API_BASE_URL",
+    llm_api_key: str | None = Field(default=None, validation_alias=AliasChoices("LLM_API_KEY", "DEEPSEEK_API_KEY"))
+    llm_api_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_API_BASE_URL", "DEEPSEEK_API_BASE_URL"),
     )
-    deepseek_model: str = Field(default="deepseek-chat", validation_alias="DEEPSEEK_MODEL")
+    llm_model: str = Field(default="", validation_alias=AliasChoices("LLM_MODEL", "DEEPSEEK_MODEL"))
+    llm_provider: str = Field(default="openai-compatible", validation_alias=AliasChoices("LLM_PROVIDER", "DEEPSEEK_PROVIDER"))
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -21,4 +22,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-

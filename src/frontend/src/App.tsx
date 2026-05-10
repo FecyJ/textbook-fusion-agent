@@ -126,8 +126,8 @@ export default function App() {
   const [ragStatus, setRagStatus] = useState<RagStatus | null>(null);
   const [ragAnswer, setRagAnswer] = useState<RagAnswer | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("integration");
-  const [query, setQuery] = useState("炎症是什么？");
-  const [feedback, setFeedback] = useState("请保留炎症相关知识点");
+  const [query, setQuery] = useState("这个概念的核心定义是什么？");
+  const [feedback, setFeedback] = useState("请保留这个关键知识点");
   const [report, setReport] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [removingTextbookId, setRemovingTextbookId] = useState<string | null>(null);
@@ -383,7 +383,7 @@ export default function App() {
       <aside className="left-rail">
         <header className="brand">
           <span>Textbook Fusion</span>
-          <strong>医学教材整合智能体</strong>
+          <strong>教材知识整合智能体</strong>
         </header>
 
         <label className="upload-zone" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>

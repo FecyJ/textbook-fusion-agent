@@ -40,6 +40,7 @@ Build a web application for the AI full-stack hackathon task: load multiple text
 - Before staging, check:
   `git status --short --ignored`
 - Do not use commands that would print `.env` values. It is acceptable to list variable names only.
+- LLM configuration should use provider-neutral `LLM_API_KEY`, `LLM_API_BASE_URL`, `LLM_MODEL`, and optional `LLM_PROVIDER`. Legacy `DEEPSEEK_*` names are compatibility fallback only.
 
 ## Known Local Environment Pitfalls
 
@@ -54,5 +55,6 @@ Build a web application for the AI full-stack hackathon task: load multiple text
 
 - Keep P0 complete before P1/P2 work.
 - Prefer deterministic local fallbacks for hackathon speed: parse and cache local files, avoid repeated LLM calls where cached structured results are enough.
+- Keep domain language provider-neutral and subject-neutral unless a task explicitly targets one discipline. This app is for textbook/course knowledge integration, not only medical textbooks.
 - Every answer or report statistic must trace back to stored textbook/chapter/page metadata.
 - Keep generated data out of Git unless it is a required Markdown deliverable under `docs/` or `report/`.

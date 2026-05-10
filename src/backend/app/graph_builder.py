@@ -44,8 +44,8 @@ async def extract_chapter_graph(textbook: Textbook, chapter: Chapter, use_llm: b
 async def extract_with_llm(textbook: Textbook, chapter: Chapter) -> tuple[list[KnowledgeNode], list[GraphEdge]]:
     content = chapter.content[:4500]
     system = (
-        "你是医学教材知识图谱抽取器。只输出 JSON。"
-        "从一个章节中抽取 4-8 个核心知识点和关系，关系类型只允许 "
+        "你是通用教材知识图谱抽取器，适用于不同学科的课程材料。只输出 JSON。"
+        "从一个章节中抽取 4-8 个可独立讲授的核心知识点和关系，关系类型只允许 "
         "prerequisite, parallel, contains, applies_to。"
     )
     user = f"""

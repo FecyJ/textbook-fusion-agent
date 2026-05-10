@@ -16,12 +16,15 @@ AI 全栈黑客松项目：面向多本教材的知识整合、知识图谱、RA
    cp .env.example .env
    ```
 
-2. 在 `.env` 中填写大模型服务配置。当前项目默认读取：
+2. 在 `.env` 中填写大模型服务配置。当前项目默认读取 OpenAI-compatible Chat API 形式的通用变量：
 
-- `DEEPSEEK_API_KEY`
-- `DEEPSEEK_API_BASE_URL`
-- `DEEPSEEK_MODEL`
+- `LLM_API_KEY`
+- `LLM_API_BASE_URL`
+- `LLM_MODEL`
+- `LLM_PROVIDER`（可选，默认 `openai-compatible`）
 - `TEXTBOOK_FUSION_DATA_DIR`（可选，默认 `data/`）
+
+旧版 `DEEPSEEK_API_KEY` / `DEEPSEEK_API_BASE_URL` / `DEEPSEEK_MODEL` 仍作为兼容兜底，但新配置应优先使用 `LLM_*`。
 
 ## 安装依赖
 
