@@ -440,17 +440,22 @@ export default function App() {
             <Activity size={16} />
             <span>图谱编码</span>
           </div>
+          <p className="legend-note">节点均为圆形，大小、颜色、描边和标签显示规则可叠加。</p>
           <div className="legend-row">
             <i className="node-dot major" />
-            <span>大节点：高连接/高频/多来源概念</span>
+            <span>大深色节点：高频、高连接或多证据核心概念</span>
+          </div>
+          <div className="legend-row">
+            <i className="node-dot source" />
+            <span>普通节点：颜色表示教材来源</span>
           </div>
           <div className="legend-row">
             <i className="node-dot minor" />
-            <span>黄色小节点：低连接章节局部概念</span>
+            <span>小节点：低连接章节局部概念，颜色仍跟随教材来源</span>
           </div>
           <div className="legend-row">
             <i className="node-dot warning" />
-            <span>描边节点：低质量或含抽取警告</span>
+            <span>虚线描边节点：低质量或含抽取警告，可叠加在任意节点上</span>
           </div>
           <div className="relation-legend">
             <span><i style={{ background: relationColor("prerequisite") }} />前置依赖 A→B</span>
@@ -961,7 +966,6 @@ function mapGraphNodes(nodes: ScoredNode[], colors: Map<string, string>, zoom: n
 function nodeColor(node: KnowledgeNode, colors: Map<string, string>, normalized: number) {
   const base = colors.get(node.textbook_id) ?? "#276c68";
   if ((node.frequency || 1) > 2 || normalized > 0.72) return "#1f5957";
-  if (normalized < 0.34) return "#d49b2a";
   return base;
 }
 

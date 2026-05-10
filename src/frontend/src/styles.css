@@ -243,6 +243,13 @@ button:disabled {
   padding-top: 16px;
 }
 
+.legend-note {
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .section-title,
 .topbar,
 .actions,
@@ -685,10 +692,16 @@ h2 {
   background: var(--deep-teal);
 }
 
+.node-dot.source {
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(135deg, #276c68 0 32%, #8f5f18 32% 64%, #465f90 64% 100%);
+}
+
 .node-dot.minor {
   width: 12px;
   height: 12px;
-  background: var(--amber);
+  background: #276c68;
 }
 
 .node-dot.warning {
