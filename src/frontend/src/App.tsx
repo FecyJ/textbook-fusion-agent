@@ -120,7 +120,7 @@ export default function App() {
   const [report, setReport] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [useLlm, setUseLlm] = useState(true);
+  const [useLlm, setUseLlm] = useState(false);
   const chartRef = useRef<HTMLDivElement | null>(null);
 
   const textbookColor = useMemo(() => {
@@ -187,7 +187,15 @@ export default function App() {
     setBusy("graph");
     setError(null);
     try {
-      const response = await axios.post<{ graphs: GraphData[] }>("/api/graphs/build", { use_llm: useLlm });
+      const response = await axios.post<{ graphs: GraphData[] }>(
+        "/api/graphs/build",
+        {
+          use_llm: useLlm,
+          llm_chapter_limit: useLlm ? 2 : 0,
+          max_chapters: 80,
+        },
+        { timeout: 90000 },
+      );
       const firstGraph = response.data.graphs[0];
       if (firstGraph) setGraph(firstGraph);
       await refreshAll();
@@ -333,7 +341,7 @@ export default function App() {
           <div className="actions">
             <label className="switch">
               <input checked={useLlm} type="checkbox" onChange={(event) => setUseLlm(event.target.checked)} />
-              <span>DeepSeek 增强</span>
+              <span>少量 LLM 增强</span>
             </label>
             <button onClick={buildGraphs} disabled={!!busy || completedCount === 0}>
               {busy === "graph" ? <Loader2 className="spin" size={16} /> : <Network size={16} />}
@@ -553,4 +561,3 @@ function errorMessage(error: unknown) {
   }
   return error instanceof Error ? error.message : "操作失败";
 }
-

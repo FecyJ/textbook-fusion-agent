@@ -104,7 +104,9 @@ async def upload_textbooks(files: list[UploadFile] = File(...)) -> dict[str, obj
 async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -> dict[str, object]:
     state = load_state()
     textbook_ids = payload.get("textbook_ids") or list(state.textbooks.keys())
-    use_llm = bool(payload.get("use_llm", True))
+    use_llm = bool(payload.get("use_llm", False))
+    llm_chapter_limit = int(payload.get("llm_chapter_limit", 2))
+    max_chapters = int(payload.get("max_chapters", 80))
     built = []
     for textbook_id in textbook_ids:
         textbook = state.textbooks.get(str(textbook_id))
@@ -112,7 +114,12 @@ async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -
             continue
         if textbook.status != "completed":
             continue
-        graph = await build_graph_for_textbook(textbook, use_llm=use_llm)
+        graph = await build_graph_for_textbook(
+            textbook,
+            use_llm=use_llm,
+            llm_chapter_limit=max(0, min(llm_chapter_limit, 8)),
+            max_chapters=max(10, min(max_chapters, 120)),
+        )
         state.graphs[textbook.textbook_id] = graph
         built.append({"textbook_id": textbook.textbook_id, "nodes": len(graph.nodes), "edges": len(graph.edges)})
     save_state(state)

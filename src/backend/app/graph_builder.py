@@ -12,12 +12,14 @@ RELATION_TYPES = {"prerequisite", "parallel", "contains", "applies_to"}
 STOPWORDS = set("的是和与及在对中为以由了其一个一种进行通过可以主要相关具有包括发生形成作用系统组织细胞".split())
 
 
-async def build_graph_for_textbook(textbook: Textbook, use_llm: bool = True) -> TextbookGraph:
+async def build_graph_for_textbook(textbook: Textbook, use_llm: bool = True, llm_chapter_limit: int = 6, max_chapters: int = 80) -> TextbookGraph:
     nodes: list[KnowledgeNode] = []
     edges: list[GraphEdge] = []
     seen_names: set[str] = set()
-    for chapter in textbook.chapters:
-        chapter_nodes, chapter_edges = await extract_chapter_graph(textbook, chapter, use_llm=use_llm)
+    chapters = select_representative_chapters(textbook.chapters, max_chapters=max_chapters)
+    for chapter_index, chapter in enumerate(chapters):
+        should_use_llm = use_llm and chapter_index < llm_chapter_limit and len(chapter.content) <= 12000
+        chapter_nodes, chapter_edges = await extract_chapter_graph(textbook, chapter, use_llm=should_use_llm)
         for node in chapter_nodes:
             key = normalize_name(node.name)
             if key in seen_names:
@@ -64,7 +66,7 @@ async def extract_with_llm(textbook: Textbook, chapter: Chapter) -> tuple[list[K
 章节内容：
 {content}
 """
-    data = await llm_client.chat_json(system, user)
+    data = await llm_client.chat_json(system, user, timeout=12)
     raw_nodes = data.get("nodes", []) if isinstance(data, dict) else []
     raw_edges = data.get("edges", []) if isinstance(data, dict) else []
     nodes: list[KnowledgeNode] = []
@@ -178,3 +180,18 @@ def make_node_id(textbook_id: str, chapter_id: str, name: str) -> str:
     digest = hashlib.sha1(f"{textbook_id}:{chapter_id}:{name}".encode("utf-8")).hexdigest()[:10]
     return f"node_{digest}"
 
+
+def select_representative_chapters(chapters: list[Chapter], max_chapters: int) -> list[Chapter]:
+    useful = [chapter for chapter in chapters if chapter.content.strip()]
+    if len(useful) <= max_chapters:
+        return useful
+    step = len(useful) / max_chapters
+    selected: list[Chapter] = []
+    seen: set[str] = set()
+    for index in range(max_chapters):
+        chapter = useful[int(index * step)]
+        if chapter.chapter_id in seen:
+            continue
+        seen.add(chapter.chapter_id)
+        selected.append(chapter)
+    return selected

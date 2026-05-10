@@ -19,11 +19,18 @@ class LlmClient:
     def configured(self) -> bool:
         return bool(self.api_key)
 
-    async def chat_json(self, system: str, user: str, temperature: float = 0.1) -> dict[str, Any]:
-        text = await self.chat(system, user, temperature=temperature, response_format={"type": "json_object"})
+    async def chat_json(self, system: str, user: str, temperature: float = 0.1, timeout: float = 20) -> dict[str, Any]:
+        text = await self.chat(system, user, temperature=temperature, response_format={"type": "json_object"}, timeout=timeout)
         return extract_json(text)
 
-    async def chat(self, system: str, user: str, temperature: float = 0.2, response_format: dict[str, str] | None = None) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.2,
+        response_format: dict[str, str] | None = None,
+        timeout: float = 30,
+    ) -> str:
         if not self.configured:
             raise RuntimeError("LLM API key is not configured")
         url = f"{self.base_url}/chat/completions"
@@ -35,7 +42,7 @@ class LlmClient:
         }
         if response_format:
             payload["response_format"] = response_format
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
         data = response.json()
@@ -57,4 +64,3 @@ def extract_json(text: str) -> dict[str, Any]:
 
 
 llm_client = LlmClient()
-
