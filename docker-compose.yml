@@ -1,0 +1,17 @@
+services:
+  textbook-fusion-agent:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      TEXTBOOK_FUSION_DATA_DIR: /app/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - textbook-fusion-data:/app/data
+      - ./report:/app/report
+    restart: unless-stopped
+
+volumes:
+  textbook-fusion-data:

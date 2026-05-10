@@ -3,6 +3,8 @@ from pathlib import Path
 
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .core.config import settings
 from .graph_builder import build_graph_for_textbook
@@ -12,6 +14,9 @@ from .rag import build_rag_index, query_rag
 from .reporting import write_integration_report
 from .storage import UPLOAD_DIR, ensure_dirs, load_state, safe_filename, save_state
 from .schemas import IntegrationState
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
+FRONTEND_DIST = ROOT_DIR / "src" / "frontend" / "dist"
 
 app = FastAPI(
     title="Textbook Fusion Agent API",
@@ -30,12 +35,15 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def root() -> dict[str, object]:
+@app.api_route("/", methods=["GET", "HEAD"], response_model=None)
+def root():
+    index_path = FRONTEND_DIST / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
     return {
         "name": "Textbook Fusion Agent API",
         "status": "ok",
-        "frontend": "http://localhost:5173",
+        "frontend": "Run `npm --prefix src/frontend run build` or use Docker to serve the web app from this endpoint.",
         "health": "/api/health",
         "docs": "/docs",
         "openapi": "/openapi.json",
@@ -290,3 +298,7 @@ def graph_quality_summary(graph) -> dict[str, object]:
         "warning_count": warning_count,
         "methods": methods,
     }
+
+
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="frontend-assets")

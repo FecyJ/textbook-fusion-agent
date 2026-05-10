@@ -45,6 +45,20 @@ npm run dev
 - 前端页面: http://localhost:5173
 - 健康检查: http://localhost:8000/api/health
 
+## Docker 一键部署
+
+生产部署推荐使用单端口模式：Docker 会先构建 React 前端，再由 FastAPI 同源托管静态页面和 `/api/*` 接口。
+
+```bash
+docker compose up -d --build
+```
+
+- Web 页面: http://localhost:8000
+- API 文档: http://localhost:8000/docs
+- 健康检查: http://localhost:8000/api/health
+
+公网部署时只需要暴露容器的 `8000` 端口，并在平台环境变量中配置 `LLM_API_KEY`、`LLM_API_BASE_URL`、`LLM_MODEL`。运行数据写入 Docker volume `textbook-fusion-data`，不会进入 Git。
+
 ## UI 截图验证
 
 项目已配置 Playwright，用于后续 UI 改进时截图回归。
