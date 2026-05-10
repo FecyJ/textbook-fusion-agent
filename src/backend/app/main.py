@@ -28,6 +28,18 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root() -> dict[str, object]:
+    return {
+        "name": "Textbook Fusion Agent API",
+        "status": "ok",
+        "frontend": "http://localhost:5173",
+        "health": "/api/health",
+        "docs": "/docs",
+        "openapi": "/openapi.json",
+    }
+
+
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {
