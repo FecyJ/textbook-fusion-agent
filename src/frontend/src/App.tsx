@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Trash2,
   Upload,
 } from "lucide-react";
 
@@ -114,6 +115,8 @@ type UploadProgress = {
   filename: string;
 };
 
+const LABEL_ZOOM_THRESHOLD = 1.55;
+
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [textbooks, setTextbooks] = useState<TextbookSummary[]>([]);
@@ -127,8 +130,10 @@ export default function App() {
   const [feedback, setFeedback] = useState("请保留炎症相关知识点");
   const [report, setReport] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [removingTextbookId, setRemovingTextbookId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [useLlm, setUseLlm] = useState(false);
+  const [graphZoom, setGraphZoom] = useState(1);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({
     active: false,
     percent: 0,
@@ -136,6 +141,7 @@ export default function App() {
     filename: "",
   });
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const graphZoomRef = useRef(1);
 
   const textbookColor = useMemo(() => {
     const map = new Map<string, string>();
@@ -150,11 +156,28 @@ export default function App() {
   useEffect(() => {
     if (!chartRef.current) return;
     const chart = echarts.init(chartRef.current);
-    const option = buildGraphOption(graph, textbookColor);
+    graphZoomRef.current = 1;
+    setGraphZoom(1);
+    const option = buildGraphOption(graph, textbookColor, graphZoomRef.current);
     chart.setOption(option);
     chart.on("click", (params) => {
       const data = params.data as KnowledgeNode | undefined;
       if (data?.id) setSelectedNode(data);
+    });
+    chart.on("graphRoam", (params: unknown) => {
+      const roam = params as { zoom?: unknown };
+      if (typeof roam.zoom === "number") {
+        const nextZoom = clampZoom(graphZoomRef.current * roam.zoom);
+        graphZoomRef.current = nextZoom;
+        setGraphZoom(nextZoom);
+        chart.setOption({
+          series: [
+            {
+              data: buildGraphSeriesData(graph, textbookColor, nextZoom),
+            },
+          ],
+        });
+      }
     });
     const resize = () => chart.resize();
     window.addEventListener("resize", resize);
@@ -217,6 +240,32 @@ export default function App() {
       window.setTimeout(() => {
         setUploadProgress((current) => (current.percent === 100 ? { ...current, active: false } : current));
       }, 1200);
+    }
+  }
+
+  async function removeTextbook(textbookId: string) {
+    setRemovingTextbookId(textbookId);
+    setError(null);
+    try {
+      const response = await axios.delete<{
+        textbooks: TextbookSummary[];
+        graphs: GraphData[];
+        integration: IntegrationState;
+        rag_status: RagStatus;
+      }>(`/api/textbooks/${textbookId}`);
+      setTextbooks(response.data.textbooks);
+      setIntegration(response.data.integration);
+      setRagStatus(response.data.rag_status);
+      setSelectedNode((current) => (current?.textbook_id === textbookId ? null : current));
+      const nextGraph = response.data.integration.nodes.length
+        ? { nodes: response.data.integration.nodes, edges: response.data.integration.edges }
+        : response.data.graphs[0] ?? { nodes: [], edges: [] };
+      setGraph(nextGraph);
+      setGraphZoom(1);
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setRemovingTextbookId(null);
     }
   }
 
@@ -360,15 +409,15 @@ export default function App() {
           </div>
           <div className="legend-row">
             <i className="node-dot major" />
-            <span>大节点：高频/重点概念</span>
+            <span>大节点：高连接/高频/多来源概念</span>
           </div>
           <div className="legend-row">
             <i className="node-dot minor" />
-            <span>小节点：章节局部概念</span>
+            <span>小节点：低连接章节局部概念</span>
           </div>
           <div className="legend-row">
             <i className="label-pill-demo">概念名</i>
-            <span>仅关键节点常显标签</span>
+            <span>放大到 {LABEL_ZOOM_THRESHOLD.toFixed(1)}x 后显示概念名</span>
           </div>
         </section>
 
@@ -384,7 +433,18 @@ export default function App() {
                 <strong>{textbook.title}</strong>
                 <span>{formatSize(textbook.size_bytes)} · {textbook.chapter_count} 章 · {textbook.total_pages || "-"} 页</span>
               </div>
-              <StatusPill status={textbook.status} />
+              <div className="book-actions">
+                <StatusPill status={textbook.status} />
+                <button
+                  aria-label={`移除 ${textbook.title}`}
+                  className="icon-button danger"
+                  disabled={!!busy || removingTextbookId === textbook.textbook_id}
+                  title="移除教材"
+                  onClick={() => void removeTextbook(textbook.textbook_id)}
+                >
+                  {removingTextbookId === textbook.textbook_id ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+                </button>
+              </div>
             </article>
           ))}
         </section>
@@ -419,8 +479,8 @@ export default function App() {
         {error && <div className="error-bar">{error}</div>}
         <div className="graph-shell">
           <div className="graph-toolbar">
-            <span>节点尺寸 = 频次 + 定义完整度</span>
-            <span>标签避让：仅重点节点常显</span>
+            <span>节点尺寸 = 连接度 + 频次 + 来源信息量</span>
+            <span>当前缩放 {graphZoom.toFixed(1)}x · {graphZoom >= LABEL_ZOOM_THRESHOLD ? "显示标签" : "隐藏标签"}</span>
           </div>
           <div ref={chartRef} className="graph-canvas" />
           {graphNodeCount === 0 && (
@@ -459,93 +519,91 @@ export default function App() {
           <TabButton active={activeTab === "report"} icon={<FileText size={15} />} label="报告" onClick={() => setActiveTab("report")} />
         </nav>
 
-        {activeTab === "integration" && (
-          <Panel title="整合决策">
-            <section className="stat-stack">
-              <Metric label="压缩比" value={formatPercent(integration?.stats.compression_ratio ?? 0)} />
-              <Metric label="节点" value={`${integration?.stats.original_nodes ?? 0}→${integration?.stats.integrated_nodes ?? 0}`} />
-              <Metric label="合并/删除" value={`${integration?.stats.merge_count ?? 0}/${integration?.stats.remove_count ?? 0}`} />
-            </section>
-            <div className="decision-list">
-              {(integration?.decisions ?? []).slice(0, 24).map((decision) => (
-                <article key={decision.decision_id} className={`decision ${decision.action}`}>
-                  <span>{decision.action} · {Math.round(decision.confidence * 100)}%</span>
-                  <strong>{decision.decision_id}</strong>
-                  <p>{decision.reason}</p>
-                </article>
-              ))}
-              {!integration?.decisions.length && <p className="empty">运行整合后显示 merge / keep / remove 决策。</p>}
-            </div>
-          </Panel>
-        )}
-
-        {activeTab === "rag" && (
-          <Panel title="RAG 精准问答">
-            <button className="wide" onClick={indexRag} disabled={!!busy || completedCount === 0}>
-              {busy === "index" ? <Loader2 className="spin" size={16} /> : <Database size={16} />}
-              建立索引
-            </button>
-            <div className="input-row">
-              <input value={query} onChange={(event) => setQuery(event.target.value)} />
-              <button onClick={askRag} disabled={!!busy}>
-                {busy === "rag" ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
-              </button>
-            </div>
-            <span className="subtle">已索引 {ragStatus?.textbook_count ?? 0} 本教材，共 {ragStatus?.chunk_count ?? 0} 个知识块</span>
-            {ragAnswer && (
-              <article className="answer">
-                <p>{ragAnswer.answer}</p>
-                {ragAnswer.citations.map((citation, index) => (
-                  <details key={`${citation.textbook}-${index}`}>
-                    <summary>{citation.textbook} · {citation.chapter} · 第 {citation.page} 页 · {citation.relevance_score.toFixed(2)}</summary>
-                    <p>{ragAnswer.source_chunks[index]}</p>
-                  </details>
+        <div className="tab-content">
+          {activeTab === "integration" && (
+            <Panel title="整合决策">
+              <section className="stat-stack">
+                <Metric label="压缩比" value={formatPercent(integration?.stats.compression_ratio ?? 0)} />
+                <Metric label="节点" value={`${integration?.stats.original_nodes ?? 0}→${integration?.stats.integrated_nodes ?? 0}`} />
+                <Metric label="合并/删除" value={`${integration?.stats.merge_count ?? 0}/${integration?.stats.remove_count ?? 0}`} />
+              </section>
+              <div className="decision-list">
+                {(integration?.decisions ?? []).slice(0, 24).map((decision) => (
+                  <article key={decision.decision_id} className={`decision ${decision.action}`}>
+                    <span>{decision.action} · {Math.round(decision.confidence * 100)}%</span>
+                    <strong>{decision.decision_id}</strong>
+                    <p>{decision.reason}</p>
+                  </article>
                 ))}
-              </article>
-            )}
-          </Panel>
-        )}
+                {!integration?.decisions.length && <p className="empty">运行整合后显示 merge / keep / remove 决策。</p>}
+              </div>
+            </Panel>
+          )}
 
-        {activeTab === "dialogue" && (
-          <Panel title="教师反馈">
-            <div className="input-row tall">
-              <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} />
-              <button onClick={sendFeedback} disabled={!!busy}>
-                {busy === "feedback" ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
+          {activeTab === "rag" && (
+            <Panel title="RAG 精准问答">
+              <button className="wide" onClick={indexRag} disabled={!!busy || completedCount === 0}>
+                {busy === "index" ? <Loader2 className="spin" size={16} /> : <Database size={16} />}
+                建立索引
               </button>
-            </div>
-            <div className="conversation">
-              {(integration?.conversation ?? []).map((item, index) => (
-                <article key={`${item.time}-${index}`} className={item.role}>
-                  <span>{item.role}</span>
-                  <p>{item.content}</p>
+              <div className="input-row">
+                <input value={query} onChange={(event) => setQuery(event.target.value)} />
+                <button onClick={askRag} disabled={!!busy}>
+                  {busy === "rag" ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
+                </button>
+              </div>
+              <span className="subtle">已索引 {ragStatus?.textbook_count ?? 0} 本教材，共 {ragStatus?.chunk_count ?? 0} 个知识块</span>
+              {ragAnswer && (
+                <article className="answer">
+                  <p>{ragAnswer.answer}</p>
+                  {ragAnswer.citations.map((citation, index) => (
+                    <details key={`${citation.textbook}-${index}`}>
+                      <summary>{citation.textbook} · {citation.chapter} · 第 {citation.page} 页 · {citation.relevance_score.toFixed(2)}</summary>
+                      <p>{ragAnswer.source_chunks[index]}</p>
+                    </details>
+                  ))}
                 </article>
-              ))}
-              {!integration?.conversation.length && <p className="empty">输入“请保留…”或“拆分…”来覆盖整合决策。</p>}
-            </div>
-          </Panel>
-        )}
+              )}
+            </Panel>
+          )}
 
-        {activeTab === "report" && (
-          <Panel title="整合报告">
-            <button className="wide" onClick={generateReport} disabled={!!busy}>
-              {busy === "report" ? <Loader2 className="spin" size={16} /> : <FileText size={16} />}
-              生成 report/整合报告.md
-            </button>
-            <pre className="report-preview">{report || "报告生成后会显示 Markdown 预览。"}</pre>
-          </Panel>
-        )}
+          {activeTab === "dialogue" && (
+            <Panel title="教师反馈">
+              <div className="input-row tall">
+                <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} />
+                <button onClick={sendFeedback} disabled={!!busy}>
+                  {busy === "feedback" ? <Loader2 className="spin" size={16} /> : <Send size={16} />}
+                </button>
+              </div>
+              <div className="conversation">
+                {(integration?.conversation ?? []).map((item, index) => (
+                  <article key={`${item.time}-${index}`} className={item.role}>
+                    <span>{item.role}</span>
+                    <p>{item.content}</p>
+                  </article>
+                ))}
+                {!integration?.conversation.length && <p className="empty">输入“请保留…”或“拆分…”来覆盖整合决策。</p>}
+              </div>
+            </Panel>
+          )}
+
+          {activeTab === "report" && (
+            <Panel title="整合报告">
+              <button className="wide" onClick={generateReport} disabled={!!busy}>
+                {busy === "report" ? <Loader2 className="spin" size={16} /> : <FileText size={16} />}
+                生成 report/整合报告.md
+              </button>
+              <pre className="report-preview">{report || "报告生成后会显示 Markdown 预览。"}</pre>
+            </Panel>
+          )}
+        </div>
       </aside>
     </main>
   );
 }
 
-function buildGraphOption(graph: GraphData, colors: Map<string, string>) {
-  const scoredNodes = graph.nodes.map((node) => ({
-    node,
-    score: nodeScore(node),
-  }));
-  const maxScore = Math.max(1, ...scoredNodes.map((item) => item.score));
+function buildGraphOption(graph: GraphData, colors: Map<string, string>, zoom: number) {
+  const scoredNodes = scoreGraphNodes(graph);
   return {
     backgroundColor: "transparent",
     tooltip: {
@@ -566,36 +624,7 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>) {
         roam: true,
         draggable: true,
         cursor: "pointer",
-        data: scoredNodes.map(({ node, score }) => ({
-          ...node,
-          value: score,
-          symbol: "circle",
-          symbolSize: nodeSize(score, maxScore),
-          itemStyle: {
-            color: nodeColor(node, colors),
-            borderColor: "#f7fbfa",
-            borderWidth: score > maxScore * 0.55 ? 3 : 2,
-            shadowBlur: score > maxScore * 0.55 ? 18 : 8,
-            shadowColor: "rgba(31,76,78,.22)",
-          },
-          label: {
-            show: score > maxScore * 0.46,
-            formatter: truncateLabel(node.name),
-            position: "right",
-            distance: 10,
-            color: "#17242b",
-            fontSize: score > maxScore * 0.7 ? 13 : 11,
-            fontWeight: 700,
-            lineHeight: 18,
-            backgroundColor: "rgba(248,250,249,.92)",
-            borderColor: "rgba(163,176,181,.72)",
-            borderWidth: 1,
-            borderRadius: 6,
-            padding: [3, 7],
-            shadowBlur: 8,
-            shadowColor: "rgba(35,48,56,.12)",
-          },
-        })),
+        data: mapGraphNodes(scoredNodes, colors, zoom),
         links: graph.edges.map((edge) => ({
           source: edge.source,
           target: edge.target,
@@ -607,9 +636,11 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>) {
             curveness: edge.relation_type === "parallel" ? 0.08 : 0.02,
           },
         })),
-        force: { repulsion: 260, edgeLength: [86, 154], gravity: 0.05, friction: 0.62 },
+        force: { repulsion: 310, edgeLength: [92, 166], gravity: 0.045, friction: 0.6 },
         edgeSymbol: ["none", "arrow"],
         edgeSymbolSize: 5,
+        nodeScaleRatio: 0.26,
+        labelLayout: { hideOverlap: true },
         scaleLimit: { min: 0.25, max: 4 },
         emphasis: {
           focus: "adjacency",
@@ -625,6 +656,10 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>) {
       },
     ],
   };
+}
+
+function buildGraphSeriesData(graph: GraphData, colors: Map<string, string>, zoom: number) {
+  return mapGraphNodes(scoreGraphNodes(graph), colors, zoom);
 }
 
 function UploadProgressView({ progress, busy }: { progress: UploadProgress; busy: boolean }) {
@@ -712,22 +747,92 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "操作失败";
 }
 
-function nodeScore(node: KnowledgeNode) {
-  const frequency = Math.max(1, node.frequency || 1);
-  const sourceDepth = Math.min(5, Math.ceil((node.definition?.length ?? 0) / 48));
-  const categoryBonus = node.category.includes("核心") ? 2 : 0;
-  return frequency * 4 + sourceDepth + categoryBonus;
+type ScoredNode = {
+  node: KnowledgeNode;
+  degree: number;
+  score: number;
+  normalized: number;
+  size: number;
+};
+
+function scoreGraphNodes(graph: GraphData): ScoredNode[] {
+  const degree = new Map<string, number>();
+  graph.edges.forEach((edge) => {
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+  });
+
+  const rawScores = graph.nodes.map((node) => {
+    const nodeDegree = degree.get(node.id) ?? 0;
+    const frequency = Math.max(1, node.frequency || 1);
+    const definitionDepth = Math.min(8, Math.log2((node.definition?.length ?? 0) + 8));
+    const sourceDepth = Math.min(6, Math.log2((node.source_text?.length ?? 0) + 8));
+    const categoryBonus = node.category.includes("核心") ? 3 : 0;
+    const score = nodeDegree * 10 + Math.log2(frequency + 1) * 14 + definitionDepth * 2.2 + sourceDepth + categoryBonus;
+    return { node, degree: nodeDegree, score };
+  });
+
+  const scores = rawScores.map((item) => item.score);
+  const minScore = scores.length ? Math.min(...scores) : 0;
+  const maxScore = scores.length ? Math.max(...scores) : 1;
+  const spread = maxScore - minScore;
+  const rankedIds = [...rawScores].sort((a, b) => a.score - b.score).map((item) => item.node.id);
+
+  return rawScores.map((item) => {
+    const rank = rankedIds.indexOf(item.node.id);
+    const rankFallback = rawScores.length > 1 ? rank / (rawScores.length - 1) : 0.5;
+    const normalized = spread > 0.001 ? (item.score - minScore) / spread : rankFallback;
+    return {
+      ...item,
+      normalized,
+      size: Math.round(12 + Math.pow(normalized, 0.72) * 48),
+    };
+  });
 }
 
-function nodeSize(score: number, maxScore: number) {
-  const normalized = Math.sqrt(score / maxScore);
-  return Math.round(16 + normalized * 38);
+function mapGraphNodes(nodes: ScoredNode[], colors: Map<string, string>, zoom: number) {
+  const labelsVisible = zoom >= LABEL_ZOOM_THRESHOLD;
+  return nodes.map(({ node, score, degree, normalized, size }) => ({
+    ...node,
+    value: score,
+    degree,
+    symbol: "circle",
+    symbolSize: size,
+    itemStyle: {
+      color: nodeColor(node, colors, normalized),
+      borderColor: "#f7fbfa",
+      borderWidth: normalized > 0.58 ? 3 : 2,
+      shadowBlur: 7 + normalized * 18,
+      shadowColor: "rgba(31,76,78,.22)",
+    },
+    label: {
+      show: labelsVisible,
+      formatter: truncateLabel(node.name),
+      position: "right",
+      distance: 8 + Math.round(normalized * 8),
+      color: "#17242b",
+      fontSize: normalized > 0.7 ? 13 : 11,
+      fontWeight: 700,
+      lineHeight: 18,
+      backgroundColor: "rgba(248,250,249,.92)",
+      borderColor: "rgba(163,176,181,.72)",
+      borderWidth: 1,
+      borderRadius: 6,
+      padding: [3, 7],
+      shadowBlur: 8,
+      shadowColor: "rgba(35,48,56,.12)",
+    },
+  }));
 }
 
-function nodeColor(node: KnowledgeNode, colors: Map<string, string>) {
+function nodeColor(node: KnowledgeNode, colors: Map<string, string>, normalized: number) {
   const base = colors.get(node.textbook_id) ?? "#276c68";
-  if ((node.frequency || 1) > 2) return "#1f5957";
+  if ((node.frequency || 1) > 2 || normalized > 0.72) return "#1f5957";
   return base;
+}
+
+function clampZoom(value: number) {
+  return Math.max(0.25, Math.min(4, value));
 }
 
 function relationColor(type: string) {

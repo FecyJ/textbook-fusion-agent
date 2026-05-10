@@ -10,6 +10,7 @@ from .parser import new_textbook, parse_textbook
 from .rag import build_rag_index, query_rag
 from .reporting import write_integration_report
 from .storage import UPLOAD_DIR, ensure_dirs, load_state, safe_filename, save_state
+from .schemas import IntegrationState
 
 app = FastAPI(
     title="Textbook Fusion Agent API",
@@ -66,6 +67,46 @@ def get_textbook(textbook_id: str) -> dict[str, object]:
     if not textbook:
         raise HTTPException(status_code=404, detail="Textbook not found")
     return textbook.model_dump()
+
+
+@app.delete("/api/textbooks/{textbook_id}")
+def delete_textbook(textbook_id: str) -> dict[str, object]:
+    state = load_state()
+    textbook = state.textbooks.pop(textbook_id, None)
+    if not textbook:
+        raise HTTPException(status_code=404, detail="Textbook not found")
+
+    had_integration = bool(state.integration.nodes or state.integration.decisions)
+    conversation = state.integration.conversation
+    state.graphs.pop(textbook_id, None)
+    if had_integration and state.graphs:
+        run_integration(state)
+    elif had_integration:
+        state.integration = IntegrationState(conversation=conversation)
+    state.rag_chunks = [chunk for chunk in state.rag_chunks if chunk.textbook_id != textbook_id]
+    state.rag_indexed_at = None
+
+    upload_path = Path(textbook.upload_path)
+    try:
+        upload_path.relative_to(UPLOAD_DIR)
+    except ValueError:
+        pass
+    else:
+        if upload_path.exists() and upload_path.is_file():
+            upload_path.unlink()
+
+    save_state(state)
+    return {
+        "deleted": textbook_id,
+        "textbooks": [summary_textbook(item) for item in state.textbooks.values()],
+        "graphs": [graph.model_dump() for graph in state.graphs.values()],
+        "integration": state.integration.model_dump(),
+        "rag_status": {
+            "textbook_count": len(state.textbooks),
+            "chunk_count": len(state.rag_chunks),
+            "indexed_at": state.rag_indexed_at,
+        },
+    }
 
 
 @app.post("/api/textbooks/upload")
