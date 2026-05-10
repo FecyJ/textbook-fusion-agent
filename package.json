@@ -7,9 +7,13 @@
     "dev": "concurrently -k \"npm:dev:backend\" \"npm:dev:frontend\"",
     "dev:backend": ".venv/bin/uvicorn src.backend.app.main:app --reload --reload-dir src/backend --host 0.0.0.0 --port 8000",
     "dev:frontend": "npm --prefix src/frontend run dev -- --host 0.0.0.0",
-    "install:all": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && npm install && npm --prefix src/frontend install"
+    "install:all": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && npm install && npm --prefix src/frontend install",
+    "test:ui": "playwright test",
+    "test:ui:headed": "playwright test --headed",
+    "shot:ui": "playwright test tests/ui-smoke.spec.ts --project=chromium"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "concurrently": "^9.1.2"
   }
 }

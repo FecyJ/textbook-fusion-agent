@@ -42,6 +42,17 @@ npm run dev
 - 前端页面: http://localhost:5173
 - 健康检查: http://localhost:8000/api/health
 
+## UI 截图验证
+
+项目已配置 Playwright，用于后续 UI 改进时截图回归。
+
+```bash
+npx playwright install chromium
+npm run shot:ui
+```
+
+截图输出到 `artifacts/screenshots/workspace-1440x900.png`，测试报告输出到 `playwright-report/`。这些生成物不会提交到 Git。
+
 ## 使用流程
 
 1. 打开前端页面，上传 PDF / Markdown / TXT / DOCX 教材。

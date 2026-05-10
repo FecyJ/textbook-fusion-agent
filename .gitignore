@@ -25,6 +25,9 @@ build/
 src/frontend/dist/
 src/frontend/.vite/
 *.tsbuildinfo
+test-results/
+playwright-report/
+artifacts/screenshots/
 
 # Runtime data and generated artifacts
 data/uploads/
