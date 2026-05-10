@@ -1,0 +1,11 @@
+{
+  "chunk_size": 500,
+  "overlap": 100,
+  "top_k": 5,
+  "sparse_model": "char_2_5",
+  "tfidf_weight": 0.48,
+  "bm25_weight": 0.27,
+  "phrase_weight": 0.25,
+  "phrase_rerank": true,
+  "min_score": 0.005
+}

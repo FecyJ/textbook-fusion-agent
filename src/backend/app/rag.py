@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 from datetime import datetime
+import json
 import re
 from uuid import uuid4
 
@@ -11,6 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from .llm import llm_client
 from .schemas import AppState, RagAnswer, RagChunk, RagCitation
+from .storage import ROOT_DIR
 
 
 NO_ANSWER = "当前知识库中未找到相关信息"
@@ -29,15 +32,62 @@ QUESTION_STOPWORDS = {
     "解释",
     "简述",
 }
+DEFAULTS_PATH = ROOT_DIR / "src" / "backend" / "app" / "rag_defaults.json"
 
 
-def build_rag_index(state: AppState) -> list[RagChunk]:
+@dataclass(frozen=True)
+class RagConfig:
+    chunk_size: int = 700
+    overlap: int = 80
+    top_k: int = 5
+    sparse_model: str = "char_wb_2_4"
+    tfidf_weight: float = 0.48
+    bm25_weight: float = 0.27
+    phrase_weight: float = 0.25
+    phrase_rerank: bool = True
+    min_score: float = 0.005
+
+    def normalized(self) -> "RagConfig":
+        total = self.tfidf_weight + self.bm25_weight + (self.phrase_weight if self.phrase_rerank else 0)
+        if total <= 0:
+            return self
+        return RagConfig(
+            chunk_size=self.chunk_size,
+            overlap=self.overlap,
+            top_k=self.top_k,
+            sparse_model=self.sparse_model,
+            tfidf_weight=self.tfidf_weight / total,
+            bm25_weight=self.bm25_weight / total,
+            phrase_weight=(self.phrase_weight / total if self.phrase_rerank else 0),
+            phrase_rerank=self.phrase_rerank,
+            min_score=self.min_score,
+        )
+
+    def model_dump(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def load_rag_config() -> RagConfig:
+    if not DEFAULTS_PATH.exists():
+        return RagConfig()
+    with DEFAULTS_PATH.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    allowed = {field for field in RagConfig.__dataclass_fields__}
+    values = {key: value for key, value in data.items() if key in allowed}
+    return RagConfig(**values).normalized()
+
+
+DEFAULT_RAG_CONFIG = load_rag_config()
+
+
+def build_rag_index(state: AppState, config: RagConfig | None = None) -> list[RagChunk]:
+    config = config or DEFAULT_RAG_CONFIG
     chunks: list[RagChunk] = []
     for textbook in state.textbooks.values():
         if textbook.status != "completed":
             continue
         for chapter in textbook.chapters:
-            for offset, chunk_text in enumerate(split_text(chapter.content)):
+            for offset, chunk_text in enumerate(split_text(chapter.content, config.chunk_size, config.overlap)):
                 chunks.append(
                     RagChunk(
                         chunk_id=f"chunk_{uuid4().hex[:10]}",
@@ -58,7 +108,7 @@ async def query_rag(state: AppState, question: str) -> RagAnswer:
     chunks = state.rag_chunks or build_rag_index(state)
     if not chunks:
         return RagAnswer(answer=NO_ANSWER, citations=[], source_chunks=[])
-    ranked = retrieve(chunks, question, top_k=5)
+    ranked = retrieve(chunks, question)
     if not ranked:
         return RagAnswer(answer=NO_ANSWER, citations=[], source_chunks=[])
     citations = [
@@ -84,12 +134,17 @@ def split_text(text: str, chunk_size: int = 700, overlap: int = 80) -> list[str]
     return chunks
 
 
-def retrieve(chunks: list[RagChunk], question: str, top_k: int = 5) -> list[tuple[RagChunk, float]]:
+def retrieve(chunks: list[RagChunk], question: str, top_k: int | None = None, config: RagConfig | None = None) -> list[tuple[RagChunk, float]]:
     if not chunks:
         return []
+    config = config or DEFAULT_RAG_CONFIG
+    top_k = top_k or config.top_k
 
     corpus = [chunk.text for chunk in chunks]
-    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4), min_df=1)
+    if config.sparse_model == "char_2_5":
+        vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(2, 5), min_df=1)
+    else:
+        vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4), min_df=1)
     matrix = vectorizer.fit_transform(corpus + [question])
     tfidf_scores = cosine_similarity(matrix[-1], matrix[:-1]).flatten()
 
@@ -99,10 +154,10 @@ def retrieve(chunks: list[RagChunk], question: str, top_k: int = 5) -> list[tupl
     max_bm25 = max(bm25_scores) if len(bm25_scores) else 0
     if max_bm25:
         bm25_scores = bm25_scores / max_bm25
-    phrase_scores = exact_phrase_scores(chunks, question)
-    combined = 0.48 * tfidf_scores + 0.27 * bm25_scores + 0.25 * phrase_scores
+    phrase_scores = exact_phrase_scores(chunks, question) if config.phrase_rerank else np.zeros(len(chunks), dtype=float)
+    combined = config.tfidf_weight * tfidf_scores + config.bm25_weight * bm25_scores + config.phrase_weight * phrase_scores
     order = combined.argsort()[::-1][:top_k]
-    return [(chunks[index], float(combined[index])) for index in order if combined[index] > 0.005]
+    return [(chunks[index], float(combined[index])) for index in order if combined[index] > config.min_score]
 
 
 async def generate_answer(question: str, ranked: list[tuple[RagChunk, float]]) -> str:

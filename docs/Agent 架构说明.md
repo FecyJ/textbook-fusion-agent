@@ -89,3 +89,13 @@ RAG 检索策略：
 
 - 把整合决策、压缩比、图谱节点频次、RAG 引用放在同一个操作工作台中，便于教师连续审阅。
 - 所有生成结果保留教材、章节、页码元数据，便于追溯。
+
+<!-- RAG_BENCHMARK_START -->
+## RAG Benchmark 与自动优化
+
+根据赛题要求，项目内置自建 RAG Benchmark：从已解析教材 chunk 自动生成 20-50 道带 ground truth 的题目，覆盖事实、对比、推理/关联和跨教材来源定位。评测会遍历 chunk size、重叠长度、稀疏检索模型和短语 rerank 开关，并用 Recall@5、MRR、引用命中率、证据命中率、平均响应时间和估算 token 成本做数据驱动选择。
+
+最近一次最优配置：`chunk500_ov100_char_2_5_phrase`，chunk=500，overlap=100，检索模型=char_2_5，rerank=true；Recall@5=0.6667，答案准确率=0.5667，引用命中率=0.3667，证据命中率=0.5667，平均耗时=78.35ms，平均上下文 token=1176.07。
+
+完整评测表见 `docs/RAG Benchmark.md`；离线运行产物保存在 `data/cache/rag_benchmark/latest.json`，最优线上默认配置写入 `src/backend/app/rag_defaults.json`。
+<!-- RAG_BENCHMARK_END -->

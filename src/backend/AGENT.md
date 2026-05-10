@@ -54,6 +54,10 @@ Keep the API close to the赛题 requirements:
 
 - Import/syntax check:
   `.venv/bin/python -m py_compile src/backend/app/main.py src/backend/app/core/config.py`
+- RAG regression and benchmark checks:
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q tests/test_rag.py tests/test_rag_benchmark.py`
+- RAG Benchmark optimization:
+  `.venv/bin/python scripts/rag_benchmark.py --sample-size 30 --optimize --write-docs`
 - Runtime health check:
   `NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost curl -sS http://127.0.0.1:8000/api/health`
 
@@ -65,4 +69,4 @@ Keep the API close to the赛题 requirements:
 - Do not watch `.venv/` with reload. It causes reload storms during dependency changes.
 - Local HTTP checks may fail through the proxy unless `NO_PROXY` and `no_proxy` include `127.0.0.1,localhost`.
 - After temporary checks on alternate ports such as `8001`, verify no process is still listening before starting `npm run dev`.
-
+- When tuning RAG, do not judge from one manual question only. Run the local benchmark, inspect `docs/RAG Benchmark.md`, and keep `src/backend/app/rag_defaults.json` aligned with the measured best config.
