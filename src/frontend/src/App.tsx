@@ -2,6 +2,7 @@ import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "re
 import axios from "axios";
 import * as echarts from "echarts";
 import {
+  Activity,
   Database,
   FileText,
   GitMerge,
@@ -106,6 +107,13 @@ type TabKey = "integration" | "rag" | "dialogue" | "report";
 
 const palette = ["#276c68", "#8f5f18", "#465f90", "#7b4e72", "#677235", "#a34e45", "#56606b"];
 
+type UploadProgress = {
+  active: boolean;
+  percent: number;
+  label: string;
+  filename: string;
+};
+
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [textbooks, setTextbooks] = useState<TextbookSummary[]>([]);
@@ -121,6 +129,12 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [useLlm, setUseLlm] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({
+    active: false,
+    percent: 0,
+    label: "等待教材",
+    filename: "",
+  });
   const chartRef = useRef<HTMLDivElement | null>(null);
 
   const textbookColor = useMemo(() => {
@@ -168,18 +182,41 @@ export default function App() {
   }
 
   async function uploadFiles(files: FileList | File[]) {
-    if (!files.length) return;
+    const selectedFiles = Array.from(files);
+    if (!selectedFiles.length) return;
     setBusy("upload");
     setError(null);
+    setUploadProgress({
+      active: true,
+      percent: 0,
+      label: "准备上传",
+      filename: selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} 个文件`,
+    });
     const form = new FormData();
-    Array.from(files).forEach((file) => form.append("files", file));
+    selectedFiles.forEach((file) => form.append("files", file));
     try {
-      const response = await axios.post<{ textbooks: TextbookSummary[] }>("/api/textbooks/upload", form);
+      const response = await axios.post<{ textbooks: TextbookSummary[] }>("/api/textbooks/upload", form, {
+        timeout: 180000,
+        onUploadProgress: (event) => {
+          const total = event.total ?? selectedFiles.reduce((sum, file) => sum + file.size, 0);
+          const uploadPercent = total ? Math.round((event.loaded / total) * 72) : 18;
+          setUploadProgress((current) => ({
+            ...current,
+            percent: Math.min(uploadPercent, 72),
+            label: uploadPercent >= 72 ? "上传完成，解析教材中" : "上传中",
+          }));
+        },
+      });
+      setUploadProgress((current) => ({ ...current, percent: 100, label: "complete" }));
       setTextbooks((current) => mergeTextbooks(current, response.data.textbooks));
     } catch (requestError) {
+      setUploadProgress((current) => ({ ...current, label: "上传失败" }));
       setError(errorMessage(requestError));
     } finally {
       setBusy(null);
+      window.setTimeout(() => {
+        setUploadProgress((current) => (current.percent === 100 ? { ...current, active: false } : current));
+      }, 1200);
     }
   }
 
@@ -307,11 +344,32 @@ export default function App() {
           <input multiple type="file" accept=".pdf,.md,.markdown,.txt,.docx" onChange={onFileChange} />
         </label>
 
+        <UploadProgressView progress={uploadProgress} busy={busy === "upload"} />
+
         <section className="metric-grid">
           <Metric label="教材" value={`${completedCount}/${textbooks.length}`} />
           <Metric label="章节" value={String(textbooks.reduce((sum, item) => sum + item.chapter_count, 0))} />
           <Metric label="图谱节点" value={String(graphNodeCount)} />
           <Metric label="RAG 块" value={String(ragStatus?.chunk_count ?? 0)} />
+        </section>
+
+        <section className="visual-legend">
+          <div className="section-title">
+            <Activity size={16} />
+            <span>图谱编码</span>
+          </div>
+          <div className="legend-row">
+            <i className="node-dot major" />
+            <span>大节点：高频/重点概念</span>
+          </div>
+          <div className="legend-row">
+            <i className="node-dot minor" />
+            <span>小节点：章节局部概念</span>
+          </div>
+          <div className="legend-row">
+            <i className="label-pill-demo">概念名</i>
+            <span>仅关键节点常显标签</span>
+          </div>
         </section>
 
         <section className="book-list">
@@ -337,6 +395,7 @@ export default function App() {
           <div>
             <span className="eyebrow">Knowledge Graph</span>
             <h1>跨教材知识结构</h1>
+            <span className="graph-meta">{graphNodeCount} nodes · {graphEdgeCount} relations · click node to inspect</span>
           </div>
           <div className="actions">
             <label className="switch">
@@ -359,6 +418,10 @@ export default function App() {
 
         {error && <div className="error-bar">{error}</div>}
         <div className="graph-shell">
+          <div className="graph-toolbar">
+            <span>节点尺寸 = 频次 + 定义完整度</span>
+            <span>标签避让：仅重点节点常显</span>
+          </div>
           <div ref={chartRef} className="graph-canvas" />
           {graphNodeCount === 0 && (
             <div className="graph-empty">
@@ -478,10 +541,23 @@ export default function App() {
 }
 
 function buildGraphOption(graph: GraphData, colors: Map<string, string>) {
+  const scoredNodes = graph.nodes.map((node) => ({
+    node,
+    score: nodeScore(node),
+  }));
+  const maxScore = Math.max(1, ...scoredNodes.map((item) => item.score));
   return {
     backgroundColor: "transparent",
     tooltip: {
-      formatter: (params: { data: KnowledgeNode }) => params.data?.definition || params.data?.name,
+      borderWidth: 0,
+      backgroundColor: "rgba(24,36,43,0.92)",
+      textStyle: { color: "#f7fbfa", fontSize: 12 },
+      extraCssText: "max-width:340px;white-space:normal;border-radius:8px;box-shadow:0 16px 40px rgba(15,31,38,.22);",
+      formatter: (params: { data: KnowledgeNode }) => {
+        const node = params.data;
+        if (!node?.id) return "";
+        return `<strong>${escapeHtml(node.name)}</strong><br/>${escapeHtml(node.chapter)} · 第 ${node.page} 页<br/><span>${escapeHtml(node.definition || "")}</span>`;
+      },
     },
     series: [
       {
@@ -489,23 +565,97 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>) {
         layout: "force",
         roam: true,
         draggable: true,
-        data: graph.nodes.map((node) => ({
+        cursor: "pointer",
+        data: scoredNodes.map(({ node, score }) => ({
           ...node,
-          symbolSize: 24 + Math.min(node.frequency || 1, 6) * 7,
-          itemStyle: { color: colors.get(node.textbook_id) ?? "#276c68" },
-          label: { show: true, formatter: node.name, color: "#20313b", fontSize: 12 },
+          value: score,
+          symbol: "circle",
+          symbolSize: nodeSize(score, maxScore),
+          itemStyle: {
+            color: nodeColor(node, colors),
+            borderColor: "#f7fbfa",
+            borderWidth: score > maxScore * 0.55 ? 3 : 2,
+            shadowBlur: score > maxScore * 0.55 ? 18 : 8,
+            shadowColor: "rgba(31,76,78,.22)",
+          },
+          label: {
+            show: score > maxScore * 0.46,
+            formatter: truncateLabel(node.name),
+            position: "right",
+            distance: 10,
+            color: "#17242b",
+            fontSize: score > maxScore * 0.7 ? 13 : 11,
+            fontWeight: 700,
+            lineHeight: 18,
+            backgroundColor: "rgba(248,250,249,.92)",
+            borderColor: "rgba(163,176,181,.72)",
+            borderWidth: 1,
+            borderRadius: 6,
+            padding: [3, 7],
+            shadowBlur: 8,
+            shadowColor: "rgba(35,48,56,.12)",
+          },
         })),
         links: graph.edges.map((edge) => ({
           source: edge.source,
           target: edge.target,
           label: { show: false },
-          lineStyle: { color: "#8a98a5", opacity: 0.45 },
+          lineStyle: {
+            color: relationColor(edge.relation_type),
+            opacity: 0.36,
+            width: edge.relation_type === "contains" ? 1.7 : 1.1,
+            curveness: edge.relation_type === "parallel" ? 0.08 : 0.02,
+          },
         })),
-        force: { repulsion: 220, edgeLength: 112, gravity: 0.08 },
-        emphasis: { focus: "adjacency" },
+        force: { repulsion: 260, edgeLength: [86, 154], gravity: 0.05, friction: 0.62 },
+        edgeSymbol: ["none", "arrow"],
+        edgeSymbolSize: 5,
+        scaleLimit: { min: 0.25, max: 4 },
+        emphasis: {
+          focus: "adjacency",
+          scale: 1.2,
+          label: { show: true },
+          lineStyle: { opacity: 0.78, width: 2.4 },
+        },
+        blur: {
+          itemStyle: { opacity: 0.24 },
+          lineStyle: { opacity: 0.08 },
+          label: { opacity: 0.18 },
+        },
       },
     ],
   };
+}
+
+function UploadProgressView({ progress, busy }: { progress: UploadProgress; busy: boolean }) {
+  if (!progress.active && progress.percent === 0) {
+    return (
+      <section className="upload-progress idle">
+        <div>
+          <span>导入状态</span>
+          <strong>等待上传</strong>
+        </div>
+        <div className="progress-track">
+          <i style={{ width: "0%" }} />
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className={`upload-progress ${progress.percent === 100 ? "complete" : ""}`}>
+      <div className="progress-head">
+        <div>
+          <span>{progress.filename || "教材文件"}</span>
+          <strong>{progress.label}</strong>
+        </div>
+        <b>{progress.percent}%</b>
+      </div>
+      <div className="progress-track">
+        <i style={{ width: `${progress.percent}%` }} />
+      </div>
+      {busy && <small>上传完成后后端会继续解析章节，完成时教材状态变为 completed。</small>}
+    </section>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -560,4 +710,42 @@ function errorMessage(error: unknown) {
     if (typeof detail === "string") return detail;
   }
   return error instanceof Error ? error.message : "操作失败";
+}
+
+function nodeScore(node: KnowledgeNode) {
+  const frequency = Math.max(1, node.frequency || 1);
+  const sourceDepth = Math.min(5, Math.ceil((node.definition?.length ?? 0) / 48));
+  const categoryBonus = node.category.includes("核心") ? 2 : 0;
+  return frequency * 4 + sourceDepth + categoryBonus;
+}
+
+function nodeSize(score: number, maxScore: number) {
+  const normalized = Math.sqrt(score / maxScore);
+  return Math.round(16 + normalized * 38);
+}
+
+function nodeColor(node: KnowledgeNode, colors: Map<string, string>) {
+  const base = colors.get(node.textbook_id) ?? "#276c68";
+  if ((node.frequency || 1) > 2) return "#1f5957";
+  return base;
+}
+
+function relationColor(type: string) {
+  if (type === "contains") return "#276c68";
+  if (type === "prerequisite") return "#8f5f18";
+  if (type === "applies_to") return "#465f90";
+  return "#7c8b91";
+}
+
+function truncateLabel(name: string) {
+  return name.length > 9 ? `${name.slice(0, 9)}…` : name;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
