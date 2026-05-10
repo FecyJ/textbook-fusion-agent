@@ -170,3 +170,33 @@ def test_build_graph_defaults_to_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(build_graph({}))
 
     assert calls == [True]
+
+
+def test_build_graph_timeout_falls_back_to_local_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+
+    async def fake_wait_for(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    async def slow_build_graph_for_textbook(textbook, use_llm=True, llm_chapter_limit=6, max_chapters=80):
+        calls.append(use_llm)
+        return graph_builder.TextbookGraph(textbook_id=textbook.textbook_id, nodes=[], edges=[])
+
+    textbook = make_textbook()
+    textbook.chapters = [make_chapter("肝细胞（hepatocyte）是核心概念。")]
+    fake_app_state = type(
+        "FakeState",
+        (),
+        {"textbooks": {textbook.textbook_id: textbook}, "graphs": {}, "integration": None},
+    )()
+
+    monkeypatch.setattr("src.backend.app.main.load_state", lambda: fake_app_state)
+    monkeypatch.setattr("src.backend.app.main.save_state", lambda _state: None)
+    monkeypatch.setattr("src.backend.app.main.build_graph_for_textbook", slow_build_graph_for_textbook)
+    monkeypatch.setattr("src.backend.app.main.asyncio.wait_for", fake_wait_for)
+
+    result = asyncio.run(build_graph({"build_timeout_seconds": 0}))
+
+    assert result["built"][0]["fallback"] == "llm_timeout"
+    assert calls == [False]

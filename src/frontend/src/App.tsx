@@ -190,7 +190,7 @@ export default function App() {
     };
   }, [graph, textbookColor]);
 
-  async function refreshAll() {
+  async function refreshAll(options: { preserveGraph?: boolean } = {}) {
     setError(null);
     const [healthResponse, textbookResponse, integrationResponse, ragResponse] = await Promise.all([
       axios.get<Health>("/api/health"),
@@ -202,7 +202,7 @@ export default function App() {
     setTextbooks(textbookResponse.data.textbooks);
     setIntegration(integrationResponse.data);
     setRagStatus(ragResponse.data);
-    if (integrationResponse.data.nodes.length) {
+    if (!options.preserveGraph && integrationResponse.data.nodes.length) {
       setGraph({ nodes: integrationResponse.data.nodes, edges: integrationResponse.data.edges });
     }
   }
@@ -279,15 +279,18 @@ export default function App() {
       const response = await axios.post<{ built: Array<{ textbook_id: string; nodes: number; edges: number; quality?: GraphQuality }>; graphs: GraphData[] }>(
         "/api/graphs/build",
         {
+          textbook_ids: targetGraphTextbookIds(textbooks),
           use_llm: useLlm,
-          llm_chapter_limit: useLlm ? 8 : 0,
+          llm_chapter_limit: useLlm ? 4 : 0,
           max_chapters: 80,
+          build_timeout_seconds: 60,
         },
-        { timeout: 90000 },
+        { timeout: 150000 },
       );
-      const firstGraph = response.data.graphs[0];
-      if (firstGraph) setGraph(firstGraph);
-      await refreshAll();
+      const builtIds = new Set(response.data.built.map((item) => item.textbook_id));
+      const nextGraph = response.data.graphs.find((item) => item.textbook_id && builtIds.has(item.textbook_id)) ?? response.data.graphs[0];
+      if (nextGraph) setGraph(nextGraph);
+      await refreshAll({ preserveGraph: true });
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -486,7 +489,7 @@ export default function App() {
               {busy === "integration" ? <Loader2 className="spin" size={16} /> : <GitMerge size={16} />}
               整合
             </button>
-            <button onClick={refreshAll} disabled={!!busy}>
+            <button onClick={() => void refreshAll()} disabled={!!busy}>
               <RefreshCw size={16} />
             </button>
           </div>
@@ -754,6 +757,12 @@ function mergeTextbooks(current: TextbookSummary[], incoming: TextbookSummary[])
   const map = new Map(current.map((item) => [item.textbook_id, item]));
   incoming.forEach((item) => map.set(item.textbook_id, item));
   return Array.from(map.values());
+}
+
+function targetGraphTextbookIds(textbooks: TextbookSummary[]) {
+  const completed = textbooks.filter((item) => item.status === "completed");
+  if (!completed.length) return [];
+  return [completed[completed.length - 1].textbook_id];
 }
 
 function formatSize(size: number) {

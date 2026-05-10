@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
@@ -146,8 +147,9 @@ async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -
     state = load_state()
     textbook_ids = payload.get("textbook_ids") or list(state.textbooks.keys())
     use_llm = bool(payload.get("use_llm", True))
-    llm_chapter_limit = int(payload.get("llm_chapter_limit", 8))
+    llm_chapter_limit = int(payload.get("llm_chapter_limit", 4))
     max_chapters = int(payload.get("max_chapters", 80))
+    build_timeout_seconds = int(payload.get("build_timeout_seconds", 60))
     built = []
     for textbook_id in textbook_ids:
         textbook = state.textbooks.get(str(textbook_id))
@@ -155,12 +157,25 @@ async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -
             continue
         if textbook.status != "completed":
             continue
-        graph = await build_graph_for_textbook(
-            textbook,
-            use_llm=use_llm,
-            llm_chapter_limit=max(0, min(llm_chapter_limit, 8)),
-            max_chapters=max(10, min(max_chapters, 120)),
-        )
+        fallback_reason = ""
+        try:
+            graph = await asyncio.wait_for(
+                build_graph_for_textbook(
+                    textbook,
+                    use_llm=use_llm,
+                    llm_chapter_limit=max(0, min(llm_chapter_limit, 8)),
+                    max_chapters=max(10, min(max_chapters, 120)),
+                ),
+                timeout=max(15, min(build_timeout_seconds, 180)),
+            )
+        except asyncio.TimeoutError:
+            fallback_reason = "llm_timeout"
+            graph = await build_graph_for_textbook(
+                textbook,
+                use_llm=False,
+                llm_chapter_limit=0,
+                max_chapters=max(10, min(max_chapters, 120)),
+            )
         state.graphs[textbook.textbook_id] = graph
         built.append(
             {
@@ -168,6 +183,7 @@ async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -
                 "nodes": len(graph.nodes),
                 "edges": len(graph.edges),
                 "quality": graph_quality_summary(graph),
+                "fallback": fallback_reason,
             }
         )
     save_state(state)
