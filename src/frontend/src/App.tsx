@@ -119,6 +119,14 @@ type UploadProgress = {
 };
 
 const LABEL_ZOOM_THRESHOLD = 1.2;
+const EMPTY_PROGRESS: OperationProgress = { active: false, percent: 0, label: "等待任务", detail: "" };
+
+type OperationProgress = {
+  active: boolean;
+  percent: number;
+  label: string;
+  detail: string;
+};
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -143,6 +151,8 @@ export default function App() {
     label: "等待教材",
     filename: "",
   });
+  const [graphProgress, setGraphProgress] = useState<OperationProgress>(EMPTY_PROGRESS);
+  const [integrationProgress, setIntegrationProgress] = useState<OperationProgress>(EMPTY_PROGRESS);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const graphZoomRef = useRef(1);
 
@@ -275,11 +285,18 @@ export default function App() {
   async function buildGraphs() {
     setBusy("graph");
     setError(null);
+    const targetIds = targetGraphTextbookIds(textbooks);
+    startOperationProgress(
+      setGraphProgress,
+      "构建图谱",
+      useLlm ? "清洗章节、调用 LLM 抽取节点与关系" : "使用本地候选抽取节点与关系",
+      18,
+    );
     try {
       const response = await axios.post<{ built: Array<{ textbook_id: string; nodes: number; edges: number; quality?: GraphQuality }>; graphs: GraphData[] }>(
         "/api/graphs/build",
         {
-          textbook_ids: targetGraphTextbookIds(textbooks),
+          textbook_ids: targetIds,
           use_llm: useLlm,
           llm_chapter_limit: useLlm ? 4 : 0,
           max_chapters: 80,
@@ -290,8 +307,10 @@ export default function App() {
       const builtIds = new Set(response.data.built.map((item) => item.textbook_id));
       const nextGraph = response.data.graphs.find((item) => item.textbook_id && builtIds.has(item.textbook_id)) ?? response.data.graphs[0];
       if (nextGraph) setGraph(nextGraph);
+      completeOperationProgress(setGraphProgress, "图谱构建完成", `${nextGraph?.nodes.length ?? 0} 个节点 · ${nextGraph?.edges.length ?? 0} 条关系`);
       await refreshAll({ preserveGraph: true });
     } catch (requestError) {
+      failOperationProgress(setGraphProgress, "图谱构建失败");
       setError(errorMessage(requestError));
     } finally {
       setBusy(null);
@@ -301,12 +320,19 @@ export default function App() {
   async function runIntegration() {
     setBusy("integration");
     setError(null);
+    startOperationProgress(setIntegrationProgress, "整合图谱", "对齐重复知识点、重映射关系并计算压缩比", 22);
     try {
       const response = await axios.post<IntegrationState>("/api/integration/run");
       setIntegration(response.data);
       setGraph({ nodes: response.data.nodes, edges: response.data.edges });
       setActiveTab("integration");
+      completeOperationProgress(
+        setIntegrationProgress,
+        "整合完成",
+        `${response.data.stats.original_nodes}→${response.data.stats.integrated_nodes} 节点 · 压缩比 ${formatPercent(response.data.stats.compression_ratio)}`,
+      );
     } catch (requestError) {
+      failOperationProgress(setIntegrationProgress, "整合失败");
       setError(errorMessage(requestError));
     } finally {
       setBusy(null);
@@ -501,6 +527,7 @@ export default function App() {
             <span>节点尺寸 = 连接度 + 频次 + 质量分；低质量节点会降权</span>
             <span>当前缩放 {graphZoom.toFixed(1)}x · {graphZoom >= LABEL_ZOOM_THRESHOLD ? "显示标签" : "隐藏标签"}</span>
           </div>
+          <OperationProgressView progress={busy === "integration" ? integrationProgress : graphProgress} />
           <div ref={chartRef} className="graph-canvas" />
           {graphNodeCount === 0 && (
             <div className="graph-empty">
@@ -650,24 +677,10 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>, zoom: n
         draggable: true,
         cursor: "pointer",
         data: mapGraphNodes(scoredNodes, colors, zoom),
-        links: graph.edges.map((edge) => ({
-          source: edge.source,
-          target: edge.target,
-          label: { show: false },
-          lineStyle: {
-            color: relationColor(edge.relation_type),
-            opacity: 0.36,
-            width: edge.relation_type === "contains" ? 1.7 : 1.1,
-            type: edge.relation_type === "parallel" ? "dashed" : "solid",
-            curveness: edge.relation_type === "parallel" ? 0.08 : 0.02,
-          },
-          tooltip: {
-            formatter: relationLabel(edge.relation_type),
-          },
-        })),
+        links: graph.edges.map(mapGraphEdge),
         force: { repulsion: 310, edgeLength: [92, 166], gravity: 0.045, friction: 0.6 },
         edgeSymbol: ["none", "arrow"],
-        edgeSymbolSize: 5,
+        edgeSymbolSize: 7,
         nodeScaleRatio: 0.26,
         labelLayout: { hideOverlap: true },
         scaleLimit: { min: 0.25, max: 4 },
@@ -689,6 +702,66 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>, zoom: n
 
 function buildGraphSeriesData(graph: GraphData, colors: Map<string, string>, zoom: number) {
   return mapGraphNodes(scoreGraphNodes(graph), colors, zoom);
+}
+
+function mapGraphEdge(edge: GraphEdge) {
+  const style = relationStyle(edge.relation_type);
+  return {
+    source: edge.source,
+    target: edge.target,
+    label: { show: false },
+    lineStyle: {
+      color: style.color,
+      opacity: style.opacity,
+      width: style.width,
+      type: style.type,
+      curveness: style.curveness,
+    },
+    edgeSymbol: edge.relation_type === "parallel" ? ["none", "none"] : ["none", "arrow"],
+    edgeSymbolSize: style.arrow,
+    tooltip: {
+      formatter: relationLabel(edge.relation_type),
+    },
+  };
+}
+
+function startOperationProgress(
+  setter: React.Dispatch<React.SetStateAction<OperationProgress>>,
+  label: string,
+  detail: string,
+  percent: number,
+) {
+  setter({ active: true, percent, label, detail });
+  window.setTimeout(() => setter((current) => (current.active ? { ...current, percent: Math.max(current.percent, 42), detail } : current)), 500);
+  window.setTimeout(() => setter((current) => (current.active ? { ...current, percent: Math.max(current.percent, 68), detail } : current)), 1600);
+  window.setTimeout(() => setter((current) => (current.active ? { ...current, percent: Math.max(current.percent, 88), detail } : current)), 4200);
+}
+
+function completeOperationProgress(
+  setter: React.Dispatch<React.SetStateAction<OperationProgress>>,
+  label: string,
+  detail: string,
+) {
+  setter({ active: true, percent: 100, label, detail });
+  window.setTimeout(() => setter((current) => (current.percent === 100 ? { ...current, active: false } : current)), 1500);
+}
+
+function failOperationProgress(setter: React.Dispatch<React.SetStateAction<OperationProgress>>, label: string) {
+  setter((current) => ({ ...current, active: false, label, detail: "请查看错误提示", percent: Math.max(current.percent, 12) }));
+}
+
+function OperationProgressView({ progress }: { progress: OperationProgress }) {
+  if (!progress.active && progress.percent === 0) return null;
+  return (
+    <section className={`operation-progress ${progress.percent === 100 ? "complete" : ""}`}>
+      <div>
+        <strong>{progress.label}</strong>
+        <span>{progress.detail}</span>
+      </div>
+      <b>{progress.percent}%</b>
+      <i style={{ width: `${progress.percent}%` }} />
+    </section>
+  );
 }
 
 function UploadProgressView({ progress, busy }: { progress: UploadProgress; busy: boolean }) {
@@ -890,10 +963,14 @@ function clampZoom(value: number) {
 }
 
 function relationColor(type: string) {
-  if (type === "contains") return "#276c68";
-  if (type === "prerequisite") return "#8f5f18";
-  if (type === "applies_to") return "#465f90";
-  return "#7c8b91";
+  return relationStyle(type).color;
+}
+
+function relationStyle(type: string) {
+  if (type === "contains") return { color: "#1f6f64", width: 2.6, opacity: 0.66, type: "solid", curveness: 0.02, arrow: 9 };
+  if (type === "prerequisite") return { color: "#b46d1a", width: 2.2, opacity: 0.68, type: "solid", curveness: 0.14, arrow: 9 };
+  if (type === "applies_to") return { color: "#3f65a7", width: 2.0, opacity: 0.64, type: "dotted", curveness: -0.12, arrow: 8 };
+  return { color: "#7c8b91", width: 1.15, opacity: 0.3, type: "dashed", curveness: 0.08, arrow: 0 };
 }
 
 function relationLabel(type: string) {

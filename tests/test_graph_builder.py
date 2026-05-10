@@ -4,13 +4,14 @@ import pytest
 
 from src.backend.app import graph_builder
 from src.backend.app.graph_builder import (
+    enrich_relation_diversity,
     extract_chapter_graph,
     extract_heuristic,
     is_useful_chapter,
     validate_candidate_name,
 )
 from src.backend.app.main import build_graph
-from src.backend.app.schemas import Chapter, Textbook
+from src.backend.app.schemas import Chapter, KnowledgeNode, Textbook
 
 
 def make_textbook() -> Textbook:
@@ -69,6 +70,8 @@ def test_validate_candidate_rejects_chapter_and_sentence_fragments() -> None:
     assert glomerulus is not None
     assert glomerulus.name == "肾小球"
     assert validate_candidate_name("调控特定蛋白", "相关机制可调控特定蛋白表达。") is None
+    assert validate_candidate_name("胞可逆性损伤细胞", "细胞可发生可逆性损伤。") is None
+    assert validate_candidate_name("便可引起细胞", "缺氧便可引起细胞损伤。") is None
     voltage_clamp = validate_candidate_name("枪乌贼巨轴突上进行了电压钳", "在枪乌贼巨轴突上进行了电压钳实验。")
     assert voltage_clamp is not None
     assert voltage_clamp.name == "电压钳"
@@ -128,6 +131,34 @@ def test_heuristic_edges_use_relation_evidence() -> None:
         node_by_name["红细胞"].id,
         "parallel",
     ) in relation_keys
+
+
+def test_relation_diversity_enrichment_adds_specific_relation() -> None:
+    textbook = make_textbook()
+    parent = KnowledgeNode(
+        id="node_parent",
+        name="血液系统",
+        definition="血液系统包括红细胞和白细胞。",
+        category="核心概念",
+        chapter="第三章 血液",
+        textbook_id=textbook.textbook_id,
+        textbook_title=textbook.title,
+        source_text="血液系统包括红细胞和白细胞。",
+    )
+    child = KnowledgeNode(
+        id="node_child",
+        name="红细胞",
+        definition="红细胞是运输氧气的血细胞。",
+        category="核心概念",
+        chapter="第三章 血液",
+        textbook_id=textbook.textbook_id,
+        textbook_title=textbook.title,
+        source_text="血液系统包括红细胞和白细胞。",
+    )
+
+    edges = enrich_relation_diversity([parent, child], [])
+
+    assert any(edge.relation_type == "contains" and edge.source == parent.id and edge.target == child.id for edge in edges)
 
 
 def test_llm_empty_result_falls_back_to_heuristic(monkeypatch: pytest.MonkeyPatch) -> None:

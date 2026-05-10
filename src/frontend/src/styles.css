@@ -428,6 +428,58 @@ h2 {
   box-shadow: 0 8px 20px rgb(31 48 56 / 7%);
 }
 
+.operation-progress {
+  position: absolute;
+  z-index: 3;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 14px;
+  align-items: center;
+  border: 1px solid rgb(196 207 210 / 76%);
+  border-radius: 8px;
+  background: rgb(248 250 249 / 92%);
+  backdrop-filter: blur(10px);
+  padding: 12px 14px 14px;
+  box-shadow: 0 16px 34px rgb(31 48 56 / 14%);
+}
+
+.operation-progress strong,
+.operation-progress span {
+  display: block;
+}
+
+.operation-progress strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.operation-progress span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.operation-progress b {
+  color: var(--teal);
+  font-size: 18px;
+}
+
+.operation-progress > i {
+  grid-column: 1 / -1;
+  display: block;
+  height: 7px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #276c68 0%, #8f5f18 58%, #465f90 100%);
+  transition: width 320ms ease;
+}
+
+.operation-progress.complete {
+  border-color: rgb(39 108 104 / 45%);
+}
+
 .graph-empty {
   position: absolute;
   inset: 0;

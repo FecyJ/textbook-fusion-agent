@@ -72,6 +72,10 @@ BAD_FRAGMENTS = {
     "外流",
     "进行了",
     "调控特定",
+    "便可",
+    "可逆性损伤",
+    "制不同",
+    "垂体促",
 }
 BAD_PREFIXES = (
     "如",
@@ -94,6 +98,7 @@ BAD_PREFIXES = (
     "含有",
     "激活",
     "致",
+    "便",
 )
 VERB_PHRASE_MARKERS = (
     "参与",
@@ -192,7 +197,8 @@ async def build_graph_for_textbook(textbook: Textbook, use_llm: bool = True, llm
         edges.extend(chapter_edges)
     node_ids = {node.id for node in nodes}
     edges = [edge for edge in edges if edge.source in node_ids and edge.target in node_ids]
-    return TextbookGraph(textbook_id=textbook.textbook_id, nodes=nodes, edges=dedupe_edges(edges))
+    edges = enrich_relation_diversity(nodes, dedupe_edges(edges))
+    return TextbookGraph(textbook_id=textbook.textbook_id, nodes=nodes, edges=edges)
 
 
 async def extract_chapter_graph(textbook: Textbook, chapter: Chapter, use_llm: bool = True) -> tuple[list[KnowledgeNode], list[GraphEdge]]:
@@ -558,8 +564,31 @@ def infer_relation_edges(nodes: list[KnowledgeNode]) -> list[GraphEdge]:
     return dedupe_edges(edges)
 
 
+def enrich_relation_diversity(nodes: list[KnowledgeNode], edges: list[GraphEdge]) -> list[GraphEdge]:
+    if len(nodes) < 2:
+        return edges
+    relation_counts = Counter(edge.relation_type for edge in edges)
+    if len(relation_counts) >= 3 and relation_counts.get("parallel", 0) <= max(8, len(edges) * 0.85):
+        return edges
+    existing = {(edge.source, edge.target, edge.relation_type) for edge in edges}
+    additions: list[GraphEdge] = []
+    for left_index, left in enumerate(nodes[:80]):
+        for right in nodes[left_index + 1 : 80]:
+            relation = infer_relation(left, right)
+            if not relation or relation.relation_type == "parallel":
+                continue
+            key = (relation.source, relation.target, relation.relation_type)
+            if key in existing:
+                continue
+            existing.add(key)
+            additions.append(relation)
+            if len(additions) >= 24:
+                return dedupe_edges(edges + additions)
+    return dedupe_edges(edges + additions)
+
+
 def infer_relation(left: KnowledgeNode, right: KnowledgeNode) -> GraphEdge | None:
-    text = f"{left.source_text}。{right.source_text}"
+    text = relation_context(left, right)
     shared_source = f"{left.source_text}\n{right.source_text}"
     if contains_evidence(left.name, right.name, text):
         return GraphEdge(source=left.id, target=right.id, relation_type="contains", description=f"{left.name} 包含或统摄 {right.name}。")
@@ -582,6 +611,7 @@ def contains_evidence(parent: str, child: str, text: str) -> bool:
     return bool(
         re.search(rf"{re.escape(parent)}[^。；\n]{{0,28}}(?:包括|包含|分为|由.+组成|可分为)[^。；\n]{{0,36}}{re.escape(child)}", text)
         or re.search(rf"{re.escape(child)}[^。；\n]{{0,18}}(?:属于|是.+组成部分|为.+之一)[^。；\n]{{0,24}}{re.escape(parent)}", text)
+        or is_likely_hierarchy(parent, child)
     )
 
 
@@ -594,7 +624,7 @@ def prerequisite_evidence(source: str, target: str, text: str) -> bool:
 
 def applies_evidence(source: str, target: str, text: str) -> bool:
     return bool(
-        re.search(rf"{re.escape(source)}[^。；\n]{{0,28}}(?:应用于|用于|参与|调节|影响)[^。；\n]{{0,36}}{re.escape(target)}", text)
+        re.search(rf"{re.escape(source)}[^。；\n]{{0,28}}(?:应用于|用于|参与|调节|影响|抑制|促进)[^。；\n]{{0,36}}{re.escape(target)}", text)
         or re.search(rf"{re.escape(target)}[^。；\n]{{0,28}}(?:依赖|通过|利用)[^。；\n]{{0,36}}{re.escape(source)}", text)
     )
 
@@ -611,6 +641,28 @@ def parallel_evidence(left: KnowledgeNode, right: KnowledgeNode, text: str) -> b
     if left.name.endswith(CONCEPT_SUFFIXES) and right.name.endswith(CONCEPT_SUFFIXES):
         return left.name[-2:] == right.name[-2:] or left.name[-1:] == right.name[-1:]
     return False
+
+
+def relation_context(left: KnowledgeNode, right: KnowledgeNode) -> str:
+    return "。".join(
+        part
+        for part in (
+            left.name,
+            left.definition,
+            left.source_text,
+            right.name,
+            right.definition,
+            right.source_text,
+        )
+        if part
+    )
+
+
+def is_likely_hierarchy(parent: str, child: str) -> bool:
+    if parent == child or len(parent) >= len(child):
+        return False
+    parent_suffixes = ("系统", "组织", "结构", "过程", "机制", "反应", "调节", "循环", "血管", "神经")
+    return parent.endswith(parent_suffixes) and child.endswith(parent[-2:])
 
 
 def looks_like_noise_source(source_text: str) -> bool:
