@@ -446,7 +446,7 @@ export default function App() {
           </div>
           <div className="legend-row">
             <i className="node-dot minor" />
-            <span>小节点：低连接章节局部概念</span>
+            <span>黄色小节点：低连接章节局部概念</span>
           </div>
           <div className="legend-row">
             <i className="node-dot warning" />
@@ -742,8 +742,7 @@ function completeOperationProgress(
   label: string,
   detail: string,
 ) {
-  setter({ active: true, percent: 100, label, detail });
-  window.setTimeout(() => setter((current) => (current.percent === 100 ? { ...current, active: false } : current)), 1500);
+  setter({ active: false, percent: 0, label, detail });
 }
 
 function failOperationProgress(setter: React.Dispatch<React.SetStateAction<OperationProgress>>, label: string) {
@@ -861,6 +860,7 @@ type ScoredNode = {
   score: number;
   normalized: number;
   size: number;
+  layout?: { x: number; y: number; fixed?: boolean };
 };
 
 type GraphQuality = {
@@ -904,26 +904,32 @@ function scoreGraphNodes(graph: GraphData): ScoredNode[] {
   const spread = maxScore - minScore;
   const rankedIds = [...rawScores].sort((a, b) => a.score - b.score).map((item) => item.node.id);
 
+  const containmentLayout = buildContainmentLayout(graph);
   return rawScores.map((item) => {
     const rank = rankedIds.indexOf(item.node.id);
     const rankFallback = rawScores.length > 1 ? rank / (rawScores.length - 1) : 0.5;
     const normalized = spread > 0.001 ? (item.score - minScore) / spread : rankFallback;
+    const layout = containmentLayout.get(item.node.id);
     return {
       ...item,
       normalized,
       size: Math.round(12 + Math.pow(normalized, 0.72) * 48),
+      layout,
     };
   });
 }
 
 function mapGraphNodes(nodes: ScoredNode[], colors: Map<string, string>, zoom: number) {
   const labelsVisible = zoom >= LABEL_ZOOM_THRESHOLD;
-  return nodes.map(({ node, score, degree, normalized, size }) => ({
+  return nodes.map(({ node, score, degree, normalized, size, layout }) => ({
     ...node,
     value: score,
     degree,
     symbol: "circle",
     symbolSize: size,
+    x: layout?.x,
+    y: layout?.y,
+    fixed: layout?.fixed,
     itemStyle: {
       color: nodeColor(node, colors, normalized),
       borderColor: "#f7fbfa",
@@ -955,7 +961,40 @@ function mapGraphNodes(nodes: ScoredNode[], colors: Map<string, string>, zoom: n
 function nodeColor(node: KnowledgeNode, colors: Map<string, string>, normalized: number) {
   const base = colors.get(node.textbook_id) ?? "#276c68";
   if ((node.frequency || 1) > 2 || normalized > 0.72) return "#1f5957";
+  if (normalized < 0.34) return "#d49b2a";
   return base;
+}
+
+function buildContainmentLayout(graph: GraphData) {
+  const layout = new Map<string, { x: number; y: number; fixed?: boolean }>();
+  const childrenByParent = new Map<string, string[]>();
+  graph.edges.forEach((edge) => {
+    if (edge.relation_type !== "contains") return;
+    const children = childrenByParent.get(edge.source) ?? [];
+    children.push(edge.target);
+    childrenByParent.set(edge.source, children);
+  });
+  const groups = Array.from(childrenByParent.entries())
+    .filter(([, children]) => children.length >= 2)
+    .sort((left, right) => right[1].length - left[1].length)
+    .slice(0, 10);
+  groups.forEach(([parentId, childIds], groupIndex) => {
+    const column = groupIndex % 3;
+    const row = Math.floor(groupIndex / 3);
+    const centerX = (column - 1) * 420;
+    const centerY = row * 320 - 210;
+    const radius = 150 + Math.min(80, childIds.length * 12);
+    layout.set(parentId, { x: centerX, y: centerY, fixed: true });
+    childIds.slice(0, 18).forEach((childId, childIndex) => {
+      const angle = -Math.PI / 2 + (Math.PI * 2 * childIndex) / Math.max(3, Math.min(18, childIds.length));
+      layout.set(childId, {
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+        fixed: true,
+      });
+    });
+  });
+  return layout;
 }
 
 function clampZoom(value: number) {
