@@ -12,6 +12,12 @@ Applies to `src/frontend/`.
 - ECharts for knowledge graph visualization
 - lucide-react for icons
 
+## Mandatory Design Skill
+
+- Before designing or implementing any frontend UI, use the `frontend-design` skill.
+- Apply it as a product-quality interface constraint, not as decoration: this project should feel like a medical education knowledge-integration command center.
+- The visual direction is restrained, professional, data-dense, and teacher/reviewer oriented. Avoid landing-page composition, generic AI gradients, purple-blue hero styling, nested cards, and long in-app explanatory copy.
+
 ## Responsibilities
 
 - Single-page app with textbook management, graph canvas, and right-side functional panels.
@@ -51,4 +57,3 @@ Applies to `src/frontend/`.
 - The root `npm run dev` already starts both backend and frontend via `concurrently`; avoid starting an extra Vite server on the same port unless you first check `5173`.
 - Local page checks should bypass proxy for localhost:
   `NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost curl -I http://127.0.0.1:5173/`
-
