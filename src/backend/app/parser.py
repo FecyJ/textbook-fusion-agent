@@ -168,12 +168,40 @@ def clean_page_text(text: str) -> str:
     for line in lines:
         if not line:
             continue
+        line = normalize_pdf_line(line)
         if re.fullmatch(r"第?\s*\d+\s*页\s*/?\s*共?\s*\d*\s*页?", line):
             continue
         if re.fullmatch(r"\d+", line):
             continue
+        if is_running_header_or_footer(line):
+            continue
         filtered.append(line)
-    return "\n".join(filtered)
+    return normalize_text_flow("\n".join(filtered))
+
+
+def normalize_pdf_line(line: str) -> str:
+    line = line.replace("\u2002", " ").replace("\u2003", " ").replace("\u200a", " ")
+    line = re.sub(r"\s+", " ", line).strip()
+    line = re.sub(r"([A-Za-z])-\s+([A-Za-z])", r"\1\2", line)
+    line = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", line)
+    return line
+
+
+def normalize_text_flow(text: str) -> str:
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\n(?=[\u4e00-\u9fff，。；：、（）])", "", text)
+    text = re.sub(r"(?<=[（(])\s+", "", text)
+    text = re.sub(r"\s+(?=[）)])", "", text)
+    return text.strip()
+
+
+def is_running_header_or_footer(line: str) -> bool:
+    if re.fullmatch(r"第[一二三四五六七八九十\d]+章[·\s\u4e00-\u9fff]{0,20}", line) and len(line) <= 18:
+        return False
+    if re.fullmatch(r"[IVXLC]+", line):
+        return True
+    if re.fullmatch(r"\d+\s*[|｜]\s*[\u4e00-\u9fffA-Za-z ]{1,20}", line):
+        return True
+    return False
 
 
 def is_chapter_heading(line: str) -> bool:
@@ -201,4 +229,3 @@ def new_textbook(filename: str, file_format: str, size_bytes: int, upload_path: 
         upload_path=upload_path,
         status="pending",
     )
-

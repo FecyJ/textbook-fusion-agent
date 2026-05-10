@@ -15,6 +15,8 @@ Applies to `src/backend/`.
 - File upload and parsing for PDF, Markdown, TXT, and later DOCX/Excel if time allows.
 - Chapter detection, page/chapter metadata preservation, and chunking.
 - LLM calls for knowledge point and relation extraction.
+- Knowledge point extraction must reject table/figure numbers, page headers, broken parenthesis fragments, and generic phrases. Preserve `quality_score`, `extraction_method`, and `warnings` on graph nodes.
+- Graph extraction should use cleaned deterministic candidates first, then let LLM validate/define/classify them. Do not let LLM freely persist nodes from raw noisy PDF text without backend validation.
 - Knowledge graph merge decisions with confidence and reasons.
 - RAG indexing/query APIs with citations.
 - Teacher feedback APIs for updating integration decisions.
@@ -48,6 +50,9 @@ Keep the API close to the赛题 requirements:
 - Do not log API keys.
 - Ask LLMs for strict JSON and validate before persisting.
 - Keep one chapter or one bounded batch per extraction call to avoid context blowups.
+- For single-textbook graph prompts, define relation directions explicitly:
+  `prerequisite` = source is required before target, `contains` = source contains target,
+  `applies_to` = source applies to target, `parallel` = same-level concepts.
 - Cache expensive LLM outputs where possible.
 
 ## Verification

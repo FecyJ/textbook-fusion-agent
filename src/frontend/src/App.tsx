@@ -50,6 +50,9 @@ type KnowledgeNode = {
   textbook_title: string;
   source_text: string;
   frequency: number;
+  quality_score?: number;
+  extraction_method?: string;
+  warnings?: string[];
 };
 
 type GraphEdge = {
@@ -115,7 +118,7 @@ type UploadProgress = {
   filename: string;
 };
 
-const LABEL_ZOOM_THRESHOLD = 1.55;
+const LABEL_ZOOM_THRESHOLD = 1.2;
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -132,7 +135,7 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [removingTextbookId, setRemovingTextbookId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [useLlm, setUseLlm] = useState(false);
+  const [useLlm, setUseLlm] = useState(true);
   const [graphZoom, setGraphZoom] = useState(1);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({
     active: false,
@@ -273,11 +276,11 @@ export default function App() {
     setBusy("graph");
     setError(null);
     try {
-      const response = await axios.post<{ graphs: GraphData[] }>(
+      const response = await axios.post<{ built: Array<{ textbook_id: string; nodes: number; edges: number; quality?: GraphQuality }>; graphs: GraphData[] }>(
         "/api/graphs/build",
         {
           use_llm: useLlm,
-          llm_chapter_limit: useLlm ? 2 : 0,
+          llm_chapter_limit: useLlm ? 8 : 0,
           max_chapters: 80,
         },
         { timeout: 90000 },
@@ -377,6 +380,7 @@ export default function App() {
   const completedCount = textbooks.filter((textbook) => textbook.status === "completed").length;
   const graphNodeCount = graph.nodes.length;
   const graphEdgeCount = graph.edges.length;
+  const graphQuality = useMemo(() => summarizeGraphQuality(graph), [graph]);
 
   return (
     <main className="workspace">
@@ -399,7 +403,7 @@ export default function App() {
           <Metric label="教材" value={`${completedCount}/${textbooks.length}`} />
           <Metric label="章节" value={String(textbooks.reduce((sum, item) => sum + item.chapter_count, 0))} />
           <Metric label="图谱节点" value={String(graphNodeCount)} />
-          <Metric label="RAG 块" value={String(ragStatus?.chunk_count ?? 0)} />
+          <Metric label="平均质量" value={graphQuality.avgQuality ? graphQuality.avgQuality.toFixed(2) : "-"} />
         </section>
 
         <section className="visual-legend">
@@ -414,6 +418,16 @@ export default function App() {
           <div className="legend-row">
             <i className="node-dot minor" />
             <span>小节点：低连接章节局部概念</span>
+          </div>
+          <div className="legend-row">
+            <i className="node-dot warning" />
+            <span>描边节点：低质量或含抽取警告</span>
+          </div>
+          <div className="relation-legend">
+            <span><i style={{ background: relationColor("prerequisite") }} />前置依赖 A→B</span>
+            <span><i style={{ background: relationColor("contains") }} />包含 A→B</span>
+            <span><i style={{ background: relationColor("applies_to") }} />应用 A→B</span>
+            <span><i style={{ background: relationColor("parallel") }} />并列</span>
           </div>
           <div className="legend-row">
             <i className="label-pill-demo">概念名</i>
@@ -455,12 +469,14 @@ export default function App() {
           <div>
             <span className="eyebrow">Knowledge Graph</span>
             <h1>跨教材知识结构</h1>
-            <span className="graph-meta">{graphNodeCount} nodes · {graphEdgeCount} relations · click node to inspect</span>
+            <span className="graph-meta">
+              {graphNodeCount} nodes · {graphEdgeCount} relations · {graphQuality.warningCount} warnings · click node to inspect
+            </span>
           </div>
           <div className="actions">
             <label className="switch">
               <input checked={useLlm} type="checkbox" onChange={(event) => setUseLlm(event.target.checked)} />
-              <span>少量 LLM 增强</span>
+              <span>LLM 章节抽取</span>
             </label>
             <button onClick={buildGraphs} disabled={!!busy || completedCount === 0}>
               {busy === "graph" ? <Loader2 className="spin" size={16} /> : <Network size={16} />}
@@ -479,7 +495,7 @@ export default function App() {
         {error && <div className="error-bar">{error}</div>}
         <div className="graph-shell">
           <div className="graph-toolbar">
-            <span>节点尺寸 = 连接度 + 频次 + 来源信息量</span>
+            <span>节点尺寸 = 连接度 + 频次 + 质量分；低质量节点会降权</span>
             <span>当前缩放 {graphZoom.toFixed(1)}x · {graphZoom >= LABEL_ZOOM_THRESHOLD ? "显示标签" : "隐藏标签"}</span>
           </div>
           <div ref={chartRef} className="graph-canvas" />
@@ -498,9 +514,15 @@ export default function App() {
               <div>
                 <span className="eyebrow">{selectedNode.textbook_title} · 第 {selectedNode.page} 页</span>
                 <strong>{selectedNode.name}</strong>
+                <div className="node-badges">
+                  <span>{selectedNode.category}</span>
+                  <span>{selectedNode.extraction_method || "heuristic"}</span>
+                  <span>质量 {(selectedNode.quality_score ?? 1).toFixed(2)}</span>
+                  {!!selectedNode.warnings?.length && <span className="warn">{selectedNode.warnings.length} warning</span>}
+                </div>
               </div>
               <p>{selectedNode.definition}</p>
-              <span>{selectedNode.chapter}</span>
+              <span>{selectedNode.chapter}<br />{selectedNode.source_text}</span>
             </>
           ) : (
             <>
@@ -633,7 +655,11 @@ function buildGraphOption(graph: GraphData, colors: Map<string, string>, zoom: n
             color: relationColor(edge.relation_type),
             opacity: 0.36,
             width: edge.relation_type === "contains" ? 1.7 : 1.1,
+            type: edge.relation_type === "parallel" ? "dashed" : "solid",
             curveness: edge.relation_type === "parallel" ? 0.08 : 0.02,
+          },
+          tooltip: {
+            formatter: relationLabel(edge.relation_type),
           },
         })),
         force: { repulsion: 310, edgeLength: [92, 166], gravity: 0.045, friction: 0.6 },
@@ -755,6 +781,22 @@ type ScoredNode = {
   size: number;
 };
 
+type GraphQuality = {
+  avg_quality: number;
+  warning_count: number;
+  methods: Record<string, number>;
+};
+
+function summarizeGraphQuality(graph: GraphData) {
+  if (!graph.nodes.length) return { avgQuality: 0, warningCount: 0 };
+  const qualitySum = graph.nodes.reduce((sum, node) => sum + (node.quality_score ?? 1), 0);
+  const warningCount = graph.nodes.reduce((sum, node) => sum + (node.warnings?.length ?? 0), 0);
+  return {
+    avgQuality: qualitySum / graph.nodes.length,
+    warningCount,
+  };
+}
+
 function scoreGraphNodes(graph: GraphData): ScoredNode[] {
   const degree = new Map<string, number>();
   graph.edges.forEach((edge) => {
@@ -768,7 +810,9 @@ function scoreGraphNodes(graph: GraphData): ScoredNode[] {
     const definitionDepth = Math.min(8, Math.log2((node.definition?.length ?? 0) + 8));
     const sourceDepth = Math.min(6, Math.log2((node.source_text?.length ?? 0) + 8));
     const categoryBonus = node.category.includes("核心") ? 3 : 0;
-    const score = nodeDegree * 10 + Math.log2(frequency + 1) * 14 + definitionDepth * 2.2 + sourceDepth + categoryBonus;
+    const quality = Math.max(0.35, Math.min(1, node.quality_score ?? 1));
+    const warningPenalty = (node.warnings?.length ?? 0) * 5;
+    const score = (nodeDegree * 10 + Math.log2(frequency + 1) * 14 + definitionDepth * 2.2 + sourceDepth + categoryBonus) * quality - warningPenalty;
     return { node, degree: nodeDegree, score };
   });
 
@@ -801,7 +845,8 @@ function mapGraphNodes(nodes: ScoredNode[], colors: Map<string, string>, zoom: n
     itemStyle: {
       color: nodeColor(node, colors, normalized),
       borderColor: "#f7fbfa",
-      borderWidth: normalized > 0.58 ? 3 : 2,
+      borderWidth: (node.warnings?.length ?? 0) > 0 || (node.quality_score ?? 1) < 0.68 ? 4 : normalized > 0.58 ? 3 : 2,
+      borderType: (node.warnings?.length ?? 0) > 0 || (node.quality_score ?? 1) < 0.68 ? "dashed" : "solid",
       shadowBlur: 7 + normalized * 18,
       shadowColor: "rgba(31,76,78,.22)",
     },
@@ -840,6 +885,13 @@ function relationColor(type: string) {
   if (type === "prerequisite") return "#8f5f18";
   if (type === "applies_to") return "#465f90";
   return "#7c8b91";
+}
+
+function relationLabel(type: string) {
+  if (type === "contains") return "contains：A 包含 B";
+  if (type === "prerequisite") return "prerequisite：A 是 B 的前置知识";
+  if (type === "applies_to") return "applies_to：A 应用于 B";
+  return "parallel：同层级并列知识点";
 }
 
 function truncateLabel(name: string) {

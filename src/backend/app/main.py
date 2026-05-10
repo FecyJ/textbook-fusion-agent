@@ -145,8 +145,8 @@ async def upload_textbooks(files: list[UploadFile] = File(...)) -> dict[str, obj
 async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -> dict[str, object]:
     state = load_state()
     textbook_ids = payload.get("textbook_ids") or list(state.textbooks.keys())
-    use_llm = bool(payload.get("use_llm", False))
-    llm_chapter_limit = int(payload.get("llm_chapter_limit", 2))
+    use_llm = bool(payload.get("use_llm", True))
+    llm_chapter_limit = int(payload.get("llm_chapter_limit", 8))
     max_chapters = int(payload.get("max_chapters", 80))
     built = []
     for textbook_id in textbook_ids:
@@ -162,7 +162,14 @@ async def build_graph(payload: dict[str, object] = Body(default_factory=dict)) -
             max_chapters=max(10, min(max_chapters, 120)),
         )
         state.graphs[textbook.textbook_id] = graph
-        built.append({"textbook_id": textbook.textbook_id, "nodes": len(graph.nodes), "edges": len(graph.edges)})
+        built.append(
+            {
+                "textbook_id": textbook.textbook_id,
+                "nodes": len(graph.nodes),
+                "edges": len(graph.edges),
+                "quality": graph_quality_summary(graph),
+            }
+        )
     save_state(state)
     return {"built": built, "graphs": [graph.model_dump() for graph in state.graphs.values()]}
 
@@ -249,4 +256,21 @@ def summary_textbook(textbook) -> dict[str, object]:
         "chapter_count": len(textbook.chapters),
         "created_at": textbook.created_at,
         "updated_at": textbook.updated_at,
+    }
+
+
+def graph_quality_summary(graph) -> dict[str, object]:
+    if not graph.nodes:
+        return {"avg_quality": 0, "warning_count": 0, "methods": {}}
+    methods: dict[str, int] = {}
+    warning_count = 0
+    quality_sum = 0.0
+    for node in graph.nodes:
+        methods[node.extraction_method] = methods.get(node.extraction_method, 0) + 1
+        warning_count += len(node.warnings)
+        quality_sum += node.quality_score
+    return {
+        "avg_quality": round(quality_sum / len(graph.nodes), 3),
+        "warning_count": warning_count,
+        "methods": methods,
     }

@@ -46,6 +46,9 @@ class KnowledgeNode(BaseModel):
     textbook_title: str
     source_text: str = ""
     frequency: int = 1
+    quality_score: float = 1.0
+    extraction_method: str = "heuristic"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GraphEdge(BaseModel):
@@ -123,4 +126,3 @@ class AppState(BaseModel):
     integration: IntegrationState = Field(default_factory=IntegrationState)
     rag_chunks: list[RagChunk] = Field(default_factory=list)
     rag_indexed_at: str | None = None
-
